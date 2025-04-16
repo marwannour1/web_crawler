@@ -3,6 +3,7 @@ from mpi4py import MPI
 import logging
 import time
 import sys
+import os
 
 # Configure logging
 logging.basicConfig(
@@ -11,17 +12,29 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-def indexer_process():
+def indexer_process(config=None):
     """Indexer node that processes and indexes web content"""
     comm = MPI.COMM_WORLD
     size = comm.Get_size()
     rank = comm.Get_rank()
 
-    # This process should only run on indexer nodes (rank 3 in our example)
-    if rank != 3:
-        return
+    # This process should only run on indexer nodes
+    if config:
+        num_crawlers = config['num_crawlers']
+        if rank <= num_crawlers or rank > num_crawlers + config['num_indexers']:
+            return
+    else:
+        # Default behavior without config
+        if rank != 3:
+            return
 
     logging.info(f"Indexer {rank} starting")
+
+    # Setup output directory for indexed content
+    output_dir = config.get('output_dir', 'output') if config else 'output'
+    os.makedirs(output_dir, exist_ok=True)
+    index_dir = os.path.join(output_dir, f"indexer_{rank}")
+    os.makedirs(index_dir, exist_ok=True)
 
     # Main indexer loop
     while True:
@@ -38,17 +51,25 @@ def indexer_process():
         logging.info(f"Indexer {rank} received content to index")
 
         try:
-            # Simulate indexing process
-            logging.info(f"Indexer {rank} processing content")
-            time.sleep(1.5)  # Simulate indexing time
+            # Extract URL from content
+            url_line = content.split('\n', 1)[0] if isinstance(content, str) else "Unknown URL"
+            url = url_line.replace("URL: ", "")
 
-            # In a real implementation:
-            # 1. Parse the content
-            # 2. Extract keywords
-            # 3. Update the search index (e.g., using Whoosh, Elasticsearch)
+            # Generate a filename based on URL
+            import hashlib
+            filename = hashlib.md5(url.encode()).hexdigest() + ".txt"
+            filepath = os.path.join(index_dir, filename)
+
+            # Save content to file
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(content)
+
+            logging.info(f"Indexer {rank} saved content to {filepath}")
+
+            # In a real implementation, this would also update a search index
 
             # Send status update to master
-            comm.send(f"Indexer {rank} successfully indexed content", dest=0, tag=99)
+            comm.send(f"Indexer {rank} successfully indexed content for {url}", dest=0, tag=99)
             logging.info(f"Indexer {rank} completed indexing")
 
         except Exception as e:

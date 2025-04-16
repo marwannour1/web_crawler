@@ -1,0 +1,159 @@
+URL: https://docs.python.org/3/library/index.html
+Title: The Python Standard Library — Python 3.13.3 documentation
+Description: While The Python Language Reference describes the exact syntax and semantics of the Python language, this library reference manual describes the standard library that is distributed with Python. It...
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+The Python Standard Library — Python 3.13.3 documentation
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    Theme
+    
+Auto
+Light
+Dark
+
+
+
+Previous topic
+10. Full Grammar specification
+
+
+Next topic
+Introduction
+
+
+This Page
+
+Report a Bug
+
+Show Source
+        
+
+
+
+
+
+
+
+Navigation
+
+
+index
+
+modules |
+
+next |
+
+previous |
+
+Python »
+
+
+
+
+
+
+
+3.13.3 Documentation »
+    
+The Python Standard Library
+
+
+
+
+
+
+
+                     |
+                
+
+
+    Theme
+    
+Auto
+Light
+Dark
+
+ |
+
+
+
+
+
+
+
+The Python Standard LibraryÂ¶
+While The Python Language Reference describes the exact syntax and
+semantics of the Python language, this library reference manual
+describes the standard library that is distributed with Python. It also
+describes some of the optional components that are commonly included
+in Python distributions.
+Pythonâs standard library is very extensive, offering a wide range of
+facilities as indicated by the long table of contents listed below. The
+library contains built-in m

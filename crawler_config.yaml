@@ -1,0 +1,20 @@
+max_depth: 3
+num_crawlers: 4
+num_indexers: 2
+output_dir: output
+request_delay: 1.0
+restricted_domains:
+- facebook.com
+- twitter.com
+- instagram.com
+- youtube.com
+- pinterest.com
+- amazon.com
+- netflix.com
+seed_urls:
+- https://en.wikipedia.org/wiki/Web_crawler
+- https://docs.python.org/3/library/index.html
+- https://github.com/trending
+- https://www.nytimes.com/section/technology
+- https://www.reddit.com/r/programming
+timeout: 10
