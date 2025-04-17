@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 import tkinter as tk
 from tkinter import ttk, scrolledtext, filedialog, messagebox
-import yaml
-import os
 import subprocess
 import threading
 import queue
 import sys
 import time
 from crawler_config import CrawlerConfig
+from coordinator import start_crawl
+from celery.result import AsyncResult
+from celery_app import app
+import subprocess
+
 
 class StdoutRedirector:
     def __init__(self, text_widget):
@@ -45,8 +48,12 @@ class CrawlerGUI:
         self.root.title("Distributed Web Crawler")
         self.root.geometry("900x650")
         self.root.minsize(800, 600)
-        self.config_file = "crawler_config.yaml"
+        self.config_file = "crawler_config.json"
         self.process = None
+        self.task_ids = []
+        self.monitoring_paused = False  # Track if monitoring is paused
+        self.pause_event = threading.Event()  # Event for pausing/resuming
+
 
         # Default configuration
         self.config_manager = CrawlerConfig()
@@ -93,6 +100,27 @@ class CrawlerGUI:
         self.save_button = ttk.Button(self.control_frame, text="Save Configuration",
                                      command=self.save_config)
         self.save_button.pack(side=tk.RIGHT, padx=5)
+
+
+    def setup_monitor_tab(self):
+        # Create console output
+        console_frame = ttk.LabelFrame(self.monitor_tab, text="Crawler Output")
+        console_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        self.console_text = scrolledtext.ScrolledText(console_frame, wrap=tk.WORD, state=tk.DISABLED)
+        self.console_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Control buttons
+        controls_frame = ttk.Frame(self.monitor_tab)
+        controls_frame.pack(fill=tk.X, pady=5)
+
+        # Add pause/resume button
+        self.pause_button = ttk.Button(controls_frame, text="Pause Monitor",
+                                    command=self.toggle_monitor_pause)
+        self.pause_button.pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(controls_frame, text="Clear Console",
+                command=self.clear_console).pack(side=tk.RIGHT, padx=5)
 
     def setup_config_tab(self):
         # Left and right frames
@@ -177,21 +205,6 @@ class CrawlerGUI:
         ttk.Entry(output_frame, textvariable=self.output_var).pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         ttk.Button(output_frame, text="Browse", command=self.browse_output_dir).pack(side=tk.RIGHT)
 
-    def setup_monitor_tab(self):
-        # Create console output
-        console_frame = ttk.LabelFrame(self.monitor_tab, text="Crawler Output")
-        console_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        self.console_text = scrolledtext.ScrolledText(console_frame, wrap=tk.WORD, state=tk.DISABLED)
-        self.console_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # Control buttons
-        controls_frame = ttk.Frame(self.monitor_tab)
-        controls_frame.pack(fill=tk.X, pady=5)
-
-        ttk.Button(controls_frame, text="Clear Console",
-                  command=self.clear_console).pack(side=tk.RIGHT, padx=5)
-
     def browse_output_dir(self):
         directory = filedialog.askdirectory(initialdir=".", title="Select Output Directory")
         if directory:
@@ -201,6 +214,19 @@ class CrawlerGUI:
         self.console_text.config(state=tk.NORMAL)
         self.console_text.delete(1.0, tk.END)
         self.console_text.config(state=tk.DISABLED)
+
+    def toggle_monitor_pause(self):
+        """Toggle pause/resume monitoring"""
+        self.monitoring_paused = not self.monitoring_paused
+
+        if self.monitoring_paused:
+            self.pause_button.config(text="Resume Monitor")
+            self.pause_event.clear()  # Block the monitoring thread
+            print("\n>>> MONITORING PAUSED - Current state frozen <<<\n")
+        else:
+            self.pause_button.config(text="Pause Monitor")
+            self.pause_event.set()    # Unblock the monitoring thread
+            print("\n>>> MONITORING RESUMED <<<\n")
 
     def save_config(self):
         # Gather configuration from UI
@@ -231,22 +257,18 @@ class CrawlerGUI:
         # Save config first
         self.save_config()
 
-        # Calculate total processes needed
-        total_processes = 1 + self.config['num_crawlers'] + self.config['num_indexers']
-
-        # Create launcher.py if it doesn't exist
-        if not os.path.exists("src/launcher.py"):
-            self.create_launcher_file()
-
         # Redirect stdout to the console text widget
         self.redirector = StdoutRedirector(self.console_text)
         sys.stdout = self.redirector
 
+        # Make sure workers are running
+        if not self.ensure_workers_running():
+            print("Failed to start worker processes. Cannot continue.")
+            self.reset_buttons()
+            return
+
         # Start the crawler in a separate thread to avoid blocking the GUI
-        self.crawler_thread = threading.Thread(
-            target=self.run_crawler_process,
-            args=(total_processes,)
-        )
+        self.crawler_thread = threading.Thread(target=self.run_crawler_process)
         self.crawler_thread.daemon = True
         self.crawler_thread.start()
 
@@ -257,64 +279,121 @@ class CrawlerGUI:
         # Switch to monitor tab
         self.notebook.select(1)
 
-    def run_crawler_process(self, total_processes):
+    def run_crawler_process(self):
         try:
-            cmd = ["mpiexec", "-n", str(total_processes), "python", "src/launcher.py"]
-            self.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
-                bufsize=1
-            )
+            # Task limits
+            max_tasks = 100  # Maximum tasks to allow
 
-            # Print command being executed
-            print(f"Executing: {' '.join(cmd)}\n")
-            print(f"Starting crawler with {self.config['num_crawlers']} crawler(s) and {self.config['num_indexers']} indexer(s)...\n")
+            print("Starting distributed web crawler with Celery...")
+            print(f"Using {self.config['num_crawlers']} crawler workers and {self.config['num_indexers']} indexer workers")
 
-            # Read output line by line
-            for line in iter(self.process.stdout.readline, ''):
-                print(line, end='')
+            # Start the crawling process
+            self.task_ids = start_crawl()
+            print(f"Submitted {len(self.task_ids)} initial crawling tasks")
 
-            # Process finished
-            self.process.stdout.close()
-            return_code = self.process.wait()
+            # Get initial tasks
+            initial_tasks = [AsyncResult(task_id, app=app) for task_id in self.task_ids]
 
-            if return_code == 0:
-                print("\nCrawler process completed successfully.")
-            else:
-                print(f"\nCrawler process ended with return code {return_code}.")
+            # Monitor task progress with overall timeout
+            start_time = time.time()
+            max_runtime = 120  # 2 minutes max before giving up
+            last_status_time = time.time()
+            timeout_counter = 0
+
+            # Initialize the pause event
+            self.pause_event.set()
+
+            # Monitoring loop
+            while True:
+                # Check for pause
+                self.pause_event.wait()
+
+                # Get active task count from Celery
+                active_tasks = app.control.inspect().active()
+                reserved_tasks = app.control.inspect().reserved()
+
+                # Count active tasks and check limits
+                active_count = 0
+                task_count = 0
+
+                if active_tasks:
+                    task_count = sum(len(tasks) for tasks in active_tasks.values())
+                    active_count += task_count
+
+                    if task_count > max_tasks:
+                        print(f"Task count ({task_count}) exceeded maximum ({max_tasks}). Stopping crawler.")
+                        break
+
+                if reserved_tasks:
+                    active_count += sum(len(tasks) for tasks in reserved_tasks.values())
+
+                # Check timeouts
+                if time.time() - start_time > max_runtime:
+                    print("Maximum runtime exceeded. Stopping monitoring.")
+                    break
+
+                # Check if all initial tasks are complete
+                all_initial_done = all(task.ready() for task in initial_tasks)
+
+                # Check if any tasks are actually running
+                all_still_pending = all(task.state == 'PENDING' for task in initial_tasks)
+                if all_still_pending and time.time() - start_time > 30:
+                    print("Tasks remain PENDING for too long. Workers may not be running correctly.")
+                    print("Check Redis connection and worker processes.")
+                    break
+
+                # Print status every 5 seconds
+                current_time = time.time()
+                if current_time - last_status_time >= 5:
+                    last_status_time = current_time
+                    print(f"Active tasks: {active_count}")
+
+                    # Show some task states
+                    for i, task in enumerate(initial_tasks[:3]):
+                        print(f"Seed task {i+1}: {task.state}")
+
+                # Exit conditions
+                if all_initial_done and active_count == 0:
+                    print("All tasks completed!")
+                    break
+
+                # Short sleep to prevent high CPU usage
+                time.sleep(1)
+
+            print("\nCrawler process completed successfully.")
 
             # Reset buttons on GUI thread
             self.root.after(0, self.reset_buttons)
 
         except Exception as e:
             print(f"\nError running crawler: {e}")
-            # Reset buttons on GUI thread
+            import traceback
+            print(traceback.format_exc())
             self.root.after(0, self.reset_buttons)
+
 
     def reset_buttons(self):
         self.start_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
 
     def stop_crawler(self):
-        if self.process and self.process.poll() is None:
-            print("\nStopping crawler process...")
-            self.process.terminate()
+        # Revoke remaining tasks
+        if self.monitoring_paused:
+            self.toggle_monitor_pause()
+        if hasattr(self, 'task_ids') and self.task_ids:
+            print("Stopping crawler, revoking remaining tasks...")
+            for task_id in self.task_ids:
+                try:
+                    # Try to revoke the task if it's still active
+                    AsyncResult(task_id, app=app).revoke(terminate=True)
+                except Exception as e:
+                    print(f"Error revoking task {task_id}: {e}")
 
-            # Give it a moment to terminate gracefully
-            for _ in range(5):
-                if self.process.poll() is not None:
-                    break
-                time.sleep(0.5)
 
-            # Force kill if still running
-            if self.process.poll() is None:
-                self.process.kill()
-                print("Crawler process forcefully terminated.")
 
-            self.reset_buttons()
-
+        # Reset the UI
+        self.reset_buttons()
+        print("Crawler stopped by user.")
 
     def on_closing(self):
         # Restore stdout
@@ -324,11 +403,79 @@ class CrawlerGUI:
         if hasattr(self, 'redirector'):
             self.redirector.running = False
 
-        # Kill subprocess if running
+        # Stop crawler if running
         self.stop_crawler()
+
+        # Stop worker processes if running
+        if hasattr(self, 'worker_process') and self.worker_process:
+            try:
+                self.worker_process.terminate()
+            except:
+                pass
 
         # Close the window
         self.root.destroy()
+
+    def ensure_workers_running(self):
+        """Make sure Celery workers are running"""
+        print("Checking if Celery workers are running...")
+
+        # Simple check if Redis is available
+        try:
+            import redis
+            r = redis.Redis(host='localhost', port=6379, db=0)
+            r.ping()
+        except Exception as e:
+            print(f"Error connecting to Redis: {e}")
+            print("Make sure Redis server is running!")
+            return False
+
+        # Start worker processes
+        self.worker_process = subprocess.Popen(
+            ["python", "run_workers.py"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+            bufsize=1
+        )
+
+        # Rest of your function remains the same...
+        worker_ready = {"crawler": False, "indexer": False}
+
+        def read_output():
+            for line in iter(self.worker_process.stdout.readline, ''):
+                print(f"Worker output: {line.strip()}")
+                # Look for successful worker startup indicator
+                if "crawler@" in line and "ready" in line:
+                    worker_ready["crawler"] = True
+                    print("Crawler worker started successfully!")
+                if "indexer@" in line and "ready" in line:
+                    worker_ready["indexer"] = True
+                    print("Indexer worker started successfully!")
+
+        output_thread = threading.Thread(target=read_output)
+        output_thread.daemon = True
+        output_thread.start()
+
+        print("Started worker processes...")
+
+        # Wait for workers to be ready
+        start_time = time.time()
+        max_wait = 30  # Wait up to 30 seconds for workers
+
+        while time.time() - start_time < max_wait:
+            if worker_ready["crawler"] and worker_ready["indexer"]:
+                print("All workers are ready!")
+                return True
+            time.sleep(1)
+
+        # Continue anyway if at least the crawler is ready
+        if worker_ready["crawler"]:
+            print("Crawler worker is ready. Continuing.")
+            return True
+
+        print("Warning: Couldn't confirm workers are ready. Continuing anyway...")
+        return True
 
 def main():
     root = tk.Tk()

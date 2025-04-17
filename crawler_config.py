@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-import yaml
 import os
+import json
 import logging
 
 class CrawlerConfig:
     """Configuration manager for the distributed web crawler"""
 
-    def __init__(self, config_file='crawler_config.yaml'):
+    def __init__(self, config_file='crawler_config.json'):
         self.config_file = config_file
         self.config = {
             'seed_urls': [],
@@ -27,7 +27,7 @@ class CrawlerConfig:
         if os.path.exists(self.config_file):
             try:
                 with open(self.config_file, 'r') as f:
-                    loaded_config = yaml.safe_load(f)
+                    loaded_config = json.load(f)
                     if loaded_config:
                         self.config.update(loaded_config)
                 return True
@@ -40,7 +40,7 @@ class CrawlerConfig:
         """Save current configuration to file"""
         try:
             with open(self.config_file, 'w') as f:
-                yaml.dump(self.config, f, default_flow_style=False)
+                json.dump(self.config, f, indent=2)
             return True
         except Exception as e:
             logging.error(f"Error saving configuration: {e}")
