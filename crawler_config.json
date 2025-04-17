@@ -1,1 +1,20 @@
-{"seed_urls": ["https://en.wikipedia.org/wiki/Web_crawler", "https://docs.python.org/3/library/index.html", "https://github.com/trending", "https://www.nytimes.com/section/technology", "https://www.reddit.com/r/programming"], "restricted_urls": ["facebook.com", "twitter.com", "instagram.com", "youtube.com", "pinterest.com", "amazon.com", "netflix.com"], "max_depth": 1, "max_urls_per_domain": 5, "num_processes": 4}
+{
+  "seed_urls": [
+    "https://www.islamicfinder.org/world/egypt/360630/cairo-cairo-governorate-eg-prayer-times/"
+  ],
+  "restricted_domains": [
+    "facebook.com",
+    "twitter.com",
+    "instagram.com",
+    "youtube.com",
+    "pinterest.com",
+    "amazon.com",
+    "netflix.com"
+  ],
+  "max_depth": 1,
+  "num_crawlers": 6,
+  "num_indexers": 3,
+  "output_dir": "output",
+  "request_delay": 1.0,
+  "timeout": 10
+}
