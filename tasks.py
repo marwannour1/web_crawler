@@ -6,6 +6,8 @@ import hashlib
 import os
 import logging
 from celery_app import app
+import json
+from elasticsearch import Elasticsearch
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,11 +63,18 @@ def crawl(self, url, depth=0, config=None):
         description = meta_desc['content'] if meta_desc and meta_desc.get('content') else "No description"
 
         # Extract text content
-        text_content = soup.get_text()[:1000]  # First 1000 chars
+        text_content = soup.get_text()
 
-        # Prepare content
-        content = f"URL: {url}\nTitle: {title}\nDescription: {description}\n\n{text_content}"
-
+        # Prepare structured content for Elasticsearch
+        content = {
+            'url': url,
+            'title': title,
+            'description': description,
+            'text_content': text_content,
+            'html': response.text,  # Include raw HTML for Elasticsearch to process
+            'crawl_timestamp': time.time(),
+            'depth': depth
+        }
         # Schedule indexing task
         index.delay(content, url, config)
 
@@ -90,29 +99,76 @@ def crawl(self, url, depth=0, config=None):
 
 @app.task(name='tasks.index')
 def index(content, url, config):
-    """Indexer task that processes and indexes web content"""
+    """Indexer task that processes and indexes web content using Elasticsearch"""
     logger.info(f"Indexer processing content from: {url}")
 
     try:
-        # Setup output directory
-        output_dir = config['output_dir']
-        os.makedirs(output_dir, exist_ok=True)
+        # Connect to Elasticsearch
+        es_host = config.get('elasticsearch_url', 'http://localhost:9200')
+        es_user = config.get('elasticsearch_user', 'elastic')
+        es_pass = config.get('elasticsearch_password', 'elastic')
 
-        # Create a subdirectory for this worker
-        worker_id = os.environ.get('CELERY_WORKER_ID', 'worker')
-        index_dir = os.path.join(output_dir, f"indexer_{worker_id}")
-        os.makedirs(index_dir, exist_ok=True)
+# Create the connection with authentication
+        es = Elasticsearch(
+            [es_host],
+            http_auth=(es_user, es_pass)
+        )
 
-        # Generate filename based on URL
-        filename = hashlib.md5(url.encode()).hexdigest() + ".txt"
-        filepath = os.path.join(index_dir, filename)
+        # Create index if it doesn't exist
+        index_name = config.get('elasticsearch_index', 'webcrawler')
 
-        # Save content to file
-        with open(filepath, 'w', encoding='utf-8') as f:
-            f.write(content)
+        if not es.indices.exists(index=index_name):
+            # Define mapping for better text search
+            mapping = {
+                "mappings": {
+                    "properties": {
+                        "url": {"type": "keyword"},  # Exact matches for URLs
+                        "title": {"type": "text", "analyzer": "standard"},  # Full text search
+                        "description": {"type": "text", "analyzer": "standard"},
+                        "text_content": {"type": "text", "analyzer": "standard"},
+                        "crawl_timestamp": {"type": "date", "format": "epoch_second"},
+                        "depth": {"type": "integer"}
+                    }
+                }
+            }
+            es.indices.create(index=index_name, body=mapping)
+            logger.info(f"Created Elasticsearch index: {index_name}")
 
-        logger.info(f"Saved content to {filepath}")
-        return {'status': 'success', 'url': url, 'file': filepath}
+        # Index the document
+        doc_id = hashlib.md5(url.encode()).hexdigest()
+        es.index(index=index_name, id=doc_id, body=content)
+
+        logger.info(f"Indexed content in Elasticsearch: {url}")
+
+        # For backward compatibility, also save to file if needed
+        if config.get('save_to_file', True):
+            # Setup output directory
+            output_dir = config['output_dir']
+            os.makedirs(output_dir, exist_ok=True)
+
+            # Create a subdirectory for files
+            index_dir = os.path.join(output_dir, "indexer_worker")
+            os.makedirs(index_dir, exist_ok=True)
+
+            # Generate filename based on URL
+            filename = hashlib.md5(url.encode()).hexdigest() + ".txt"
+            filepath = os.path.join(index_dir, filename)
+
+            # Format content as text for file storage
+            formatted_content = f"URL: {content['url']}\nTitle: {content['title']}\nDescription: {content['description']}\n\n{content['text_content']}"
+
+            # Save content to file
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(formatted_content)
+
+            logger.info(f"Also saved content to file: {filepath}")
+
+        return {
+            'status': 'success',
+            'url': url,
+            'index': index_name,
+            'doc_id': doc_id
+        }
 
     except Exception as e:
         logger.error(f"Error indexing content from {url}: {e}")

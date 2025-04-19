@@ -16,5 +16,10 @@
   "num_indexers": 3,
   "output_dir": "output",
   "request_delay": 1.0,
-  "timeout": 10
+  "timeout": 10,
+  "elasticsearch_url": "http://localhost:9200",
+  "elasticsearch_index": "webcrawler",
+  "save_to_file": true,
+  "elasticsearch_user": "elastic",
+  "elasticsearch_password": "elastic"
 }

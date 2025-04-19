@@ -177,4 +177,1129 @@ Settings
 								JAKIM 
 							
 
-								Majlis Ugama Islam Sing
+								Majlis Ugama Islam Singapura 
+							
+
+								Muslim World League 
+							
+
+								Shia Ithna-Ashari, Leva Institute, Qum (Jafri) 
+							
+
+								Sihat/Kemenag 
+							
+
+								Spiritual Administration of Muslims of Russia 
+							
+
+								Tunisian Ministry of Religious Affairs 
+							
+
+								Umm Al-Qura 
+							
+
+								Union des Organisations Islamiques de France 
+							
+
+								University Of Islamic Sciences, Karachi 
+							
+
+								Custom - Fajar and isha Angle 
+							
+
+								Custom - Fajr Angle and Isha time adjustment 
+							
+
+
+
+
+
+
+
+Fajr angle 
+							
+
+
+
+ 10 10.5 11.0 11.5 12.0 12.5 13.0 13.5 14.0 14.5 15.0 15.5 16.0 16.5 17.0 17.5 18.0 18.5 19.0 19.5 20.0 20.5 21.0 21.5 22.0 22.5 23.0 23.5 24.0 24.5 
+
+
+Isha angle 
+									
+
+
+ 10 10.5 11.0 11.5 12.0 12.5 13.0 13.5 14.0 14.5 15.0 15.5 16.0 16.5 17.0 17.5 18.0 18.5 19.0 19.5 20.0 20.5 21.0 21.5 22.0 22.5 23.0 23.5 24.0 24.5 
+
+
+
+
+Dhuhr time after Zawal 
+					
+
+
+
+     {      1 minute (Default) 2 minutes  3 minutes  4 minutes  5 minutes  6 minutes  7 minutes  8 minutes  9 minutes  10 minutes  11 minutes  12 minutes  13 minutes  14 minutes  15 minutes  16 minutes  17 minutes  18 minutes  19 minutes  20 minutes  21 minutes  22 minutes  23 minutes  24 minutes  25 minutes  26 minutes  27 minutes  28 minutes  29 minutes  30 minutes  31 minutes  32 minutes  33 minutes  34 minutes  35 minutes  36 minutes  37 minutes  38 minutes  39 minutes  40 minutes  41 minutes  42 minutes  43 minutes  44 minutes  45 minutes  46 minutes  47 minutes  48 minutes  49 minutes  50 minutes  51 minutes  52 minutes  53 minutes  54 minutes  55 minutes  56 minutes  57 minutes  58 minutes  59 minutes  60 minutes  
+
+
+Maghrib time after Sunset 
+					
+
+
+
+ 1 minute (Default) 2 minutes  3 minutes  4 minutes  5 minutes  6 minutes  7 minutes  8 minutes  9 minutes  10 minutes  11 minutes  12 minutes  13 minutes  14 minutes  15 minutes  
+
+
+
+
+Juristic  settings 
+					
+
+
+
+ Hanbali, Maliki, Shafi Hanafi 
+
+
+Hijri Date Adjustment 
+					
+
+
+
+ +2 +1 0 -1 -2 
+
+
+
+LOCATION
+
+Auto location
+
+
+
+
+
+
+
+
+Current location
+
+
+					Please enter current location name
+				
+
+
+
+
+Latitude 
+			        
+
+
+
+
+
+					Please enter correct latitude longitude values
+				
+
+
+Longitude 
+					
+
+
+
+
+
+					Please enter correct latitude longitude values
+				
+
+
+Time zone 
+					
+
+
+
+ Africa/Cairo 
+
+					Please select time zone
+				
+
+
+
+
+Daylight adjustment 
+					
+
+
+
+ -2 -1 0 +1 +2 
+
+
+Starting Date
+
+
+
+
+
+
+
+					Please select daylight savings start date
+				
+
+
+Ending Date
+
+
+
+
+
+
+
+					Please select daylight savings end date
+				
+
+
+
+
+
+Reset
+Save & Update
+
+
+
+
+
+
+
+
+
+
+Improve your location’s accuracy
+
+×
+
+
+
+Sometimes we might have trouble finding where you are located.
+		Having your current location will help us to get you more accurate
+		prayer times and nearby Islamic places. Here are some things you can
+		do to help fix the problem.
+
+Chrome
+Safari
+Android
+iOS
+
+
+
+
+In the top right, click More 
+Click Settings and then Show advanced settings.
+In the "Privacy" section, click Content settings.
+					
+In the dialog that appears, scroll down to the "Location"
+							section. Select one of these permissions:
+Allow all sites to track your physical location: Select
+							this option to let all sites automatically see your location.
+Ask when a site tries to track your physical location:
+							Select this option if you want Google Chrome to alert you
+							whenever a site wants to see your location.
+Do not allow any site to track your physical location:
+							Select this option if don't want any sites to see your location.
+					
+
+Click Done.
+
+
+
+
+Open System Preferences and then Security & Privacy
+					Preferences and then Privacy and then Location Services.
+To allow for changes, click the lock in the bottom left.
+Check "Enable Location Services."
+
+
+
+
+Turn on location
+
+
+On your phone or tablet, open the Settings app.
+Tap Location.
+At the top, switch location on.
+Tap Mode and then High accuracy.
+
+
+If you still get an error when you open IslamicFinder, follow the
+				step 2.
+Open Chrome
+
+
+In the top right, tap More
+Tap Settings.
+Under "Advanced", tap Site Settings
+Tap Location. If you see a toggle, make sure it turned on and blue.
+
+If you see "Location access is turned off
+									for this device," tap the blue words > on the next Settings
+									screen, tap the toggle to turn on location access.
+If you see "blocked" under "Location," tap
+									Blocked > tap IslamicFinder > Clear & reset.
+								
+
+Open IslamicFinder in
+							your mobile browser and refresh the web page
+						
+
+
+If you're using a browser other than Chrome, visit your browser's
+				help center by visiting their website.
+
+
+
+
+Turn on location
+					
+Open Settings app.
+Tap Privacy > Location Services > Safari
+								Websites.
+						
+Under "Allow Location Access," tap While Using the
+								app.
+
+
+Give current location access on your browser
+					
+Safari
+Open settings app.
+Tap General > Reset.
+						
+Tap Reset Location & Privacy.
+						
+If prompted, enter your passcode.
+You will see a message that says "This will reset your
+							location and privacy settings to factory defaults." Tap Reset
+								Settings.
+						
+Open Safari
+Go to IslamicFinder
+To give Safari access to your location, tap Allow
+							or OK
+To give IslamicFinder access to your location, tap OK
+
+
+If you are using a browser other than Safari, visit your browser's
+						help center by visiting their website.
+
+
+
+
+
+
+
+
+
+
+
+
+Missed your prayers again? Athan app can help.
+Get Prayer Times alert on your phone for free.
+
+					Download Athan
+			
+* We respect the General Data Protection Regulation and the California Consumer Privacy Act guidelines
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+				Prayer Times in  Cairo
+Wrong Location?
+
+
+19 April, 2025
+20 Shawwal, 1446
+
+
+
+
+
+Fajr
+03:53 AM
+
+
+
+
+Sunrise  
+05:24 AM
+
+
+
+
+Dhuhr
+11:55 AM
+
+
+
+
+Asr
+03:30 PM
+
+
+
+
+Maghrib
+06:25 PM
+
+
+
+
+Isha
+07:47 PM
+
+
+
+
+
+
+
+
+
+Egyptian General Authority of Survey  Change 
+
+						Fajr 19.5 degrees, Isha 17.5 degrees, Hanbali, Maliki, Shafi
+								 
+
+
+
+Embed to your website
+
+
+
+
+
+
+
+Calculation Method
+
+×
+
+
+
+
+Calculation Method Info
+
+
+Organization
+Angle of the sun under the horizon (Fajr)
+Angle of the sun under the horizon (Isha)
+Region
+
+
+
+
+Muslim World League
+18 degrees
+17 degrees
+Europe, The Far East, Parts of the USA
+
+
+Egyptian General Authority of Survey
+19.5 degrees
+17.5 degrees
+Africa, Syria, Iraq, Lebanon, Malaysia, Parts of the USA
+
+
+University Of Islamic Sciences, Karachi
+18 degrees
+18 degrees
+Pakistan, Bangladesh, India, Afghanistan, Parts of Europe
+
+
+Umm Al-Qura
+18.5 Degrees (19 degrees before 1430 hijri)
+90 minutes after the Sunset Prayer.120
+							minutes (in Ramadan only)
+The Arabian Peninsula
+
+
+Islamic Society of North America
+15 degrees
+15 degrees
+Parts of the USA, Canada, Parts of the UK
+
+
+Union des Organisations Islamiques de France
+12 degrees
+12 degrees
+France region
+
+
+Majlis Ugama Islam Singapura
+20 degrees
+18 degrees
+Singapore region
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+IslamicFinder’s Official AppAthan for all your religious needs
+
+
+
+Download
+
+
+
+
+
+4.8
+Highest RatedIslamic App
+
+
+Download
+
+
+
+
+
+
+Prayer Times
+
+
+
+Al Quran
+
+
+
+Duas
+
+
+
+Qibla Direction
+
+
+
+Calendar
+
+
+
+
+
+
+Excellent app! Actually, in my opinion, the best one! It has a really great salat reminder, it helps you strengthen your Imaan and every day there's a Dua' for you! It has a lot of different Dua's in it, for every situation and it contains the Holy Qur'an in Arabic and translated! You can also read the Qur'an without knowing Arabic so it's the best for me! Masha Allah this app is amazing!
+
+Hasna El Hiyani
+Athan User
+
+
+
+
+
+
+Prayer Timetable
+
+
+Monthly
+Yearly
+
+
+
+
+Month
+
+Year
+
+
+
+Shawwal 1446-Dhul Qadah 1446
+
+
+
+
+
+
+
+Gregorian
+
+Hijri
+
+
+
+
+
+
+
+
+ 
+See monthly chart
+						
+ 
+
+
+
+
+
+
+April
+Shawwal
+Day
+Fajr
+Sunrise  
+Dhuhr
+Asr
+Maghrib
+Isha
+Qiyam
+
+
+
+
+01 Tue
+2
+Tue
+04:17 AM
+05:45 AM
+12:00 PM
+03:31 PM
+06:14 PM
+07:33 PM
+12:56 AM
+
+
+02 Wed
+3
+Wed
+04:16 AM
+05:44 AM
+11:59 AM
+03:31 PM
+06:14 PM
+07:33 PM
+12:54 AM
+
+
+03 Thu
+4
+Thu
+04:14 AM
+05:43 AM
+11:59 AM
+03:31 PM
+06:15 PM
+07:34 PM
+12:53 AM
+
+
+04 Fri
+5
+Fri
+04:13 AM
+05:42 AM
+11:59 AM
+03:31 PM
+06:16 PM
+07:35 PM
+12:54 AM
+
+
+05 Sat
+6
+Sat
+04:12 AM
+05:40 AM
+11:59 AM
+03:31 PM
+06:16 PM
+07:36 PM
+12:52 AM
+
+
+06 Sun
+7
+Sun
+04:10 AM
+05:39 AM
+11:58 AM
+03:31 PM
+06:17 PM
+07:36 PM
+12:51 AM
+
+
+07 Mon
+8
+Mon
+04:09 AM
+05:38 AM
+11:58 AM
+03:31 PM
+06:17 PM
+07:37 PM
+12:51 AM
+
+
+08 Tue
+9
+Tue
+04:08 AM
+05:37 AM
+11:58 AM
+03:31 PM
+06:18 PM
+07:38 PM
+12:50 AM
+
+
+09 Wed
+10
+Wed
+04:06 AM
+05:36 AM
+11:57 AM
+03:31 PM
+06:19 PM
+07:39 PM
+12:49 AM
+
+
+10 Thu
+11
+Thu
+04:05 AM
+05:34 AM
+11:57 AM
+03:31 PM
+06:19 PM
+07:39 PM
+12:49 AM
+
+
+11 Fri
+12
+Fri
+04:04 AM
+05:33 AM
+11:57 AM
+03:31 PM
+06:20 PM
+07:40 PM
+12:48 AM
+
+
+12 Sat
+13
+Sat
+04:02 AM
+05:32 AM
+11:57 AM
+03:31 PM
+06:20 PM
+07:41 PM
+12:48 AM
+
+
+13 Sun
+14
+Sun
+04:01 AM
+05:31 AM
+11:56 AM
+03:31 PM
+06:21 PM
+07:42 PM
+12:47 AM
+
+
+14 Mon
+15
+Mon
+04:00 AM
+05:30 AM
+11:56 AM
+03:31 PM
+06:22 PM
+07:42 PM
+12:46 AM
+
+
+15 Tue
+16
+Tue
+03:58 AM
+05:29 AM
+11:56 AM
+03:31 PM
+06:22 PM
+07:43 PM
+12:46 AM
+
+
+16 Wed
+17
+Wed
+03:57 AM
+05:28 AM
+11:56 AM
+03:31 PM
+06:23 PM
+07:44 PM
+12:45 AM
+
+
+17 Thu
+18
+Thu
+03:56 AM
+05:27 AM
+11:55 AM
+03:31 PM
+06:24 PM
+07:45 PM
+12:44 AM
+
+
+18 Fri
+19
+Fri
+03:54 AM
+05:26 AM
+11:55 AM
+03:31 PM
+06:24 PM
+07:46 PM
+12:44 AM
+
+
+19 Sat
+20
+Sat
+03:53 AM
+05:24 AM
+11:55 AM
+03:30 PM
+06:25 PM
+07:47 PM
+12:43 AM
+
+
+20 Sun
+21
+Sun
+03:52 AM
+05:23 AM
+11:55 AM
+03:30 PM
+06:25 PM
+07:47 PM
+12:43 AM
+
+
+21 Mon
+22
+Mon
+03:50 AM
+05:22 AM
+11:54 AM
+03:30 PM
+06:26 PM
+07:48 PM
+12:42 AM
+
+
+22 Tue
+23
+Tue
+03:49 AM
+05:21 AM
+11:54 AM
+03:30 PM
+06:27 PM
+07:49 PM
+12:41 AM
+
+
+23 Wed
+24
+Wed
+03:48 AM
+05:20 AM
+11:54 AM
+03:30 PM
+06:27 PM
+07:50 PM
+12:41 AM
+
+
+24 Thu
+25
+Thu
+03:47 AM
+05:19 AM
+11:54 AM
+03:30 PM
+06:28 PM
+07:51 PM
+12:40 AM
+
+
+25 Fri
+26
+Fri
+04:44 AM
+06:17 AM
+12:54 PM
+04:30 PM
+07:29 PM
+08:52 PM
+01:39 AM
+
+
+26 Sat
+27
+Sat
+04:43 AM
+06:16 AM
+12:53 PM
+04:30 PM
+07:30 PM
+08:53 PM
+01:38 AM
+
+
+27 Sun
+28
+Sun
+04:42 AM
+06:15 AM
+12:53 PM
+04:30 PM
+07:31 PM
+08:54 PM
+01:37 AM
+
+
+28 Mon
+29
+Mon
+04:40 AM
+06:14 AM
+12:53 PM
+04:30 PM
+07:31 PM
+08:55 PM
+01:37 AM
+
+
+29 Tue
+30
+Tue
+04:39 AM
+06:13 AM
+12:53 PM
+04:30 PM
+07:32 PM
+08:56 PM
+01:36 AM
+
+
+April
+Dhul Qadah
+
+
+
+
+
+
+
+
+
+
+30 Wed
+1
+Wed
+04:38 AM
+06:13 AM
+12:53 PM
+04:30 PM
+07:32 PM
+08:57 PM
+01:36 AM
+
+
+
+
+
+
+
+
+
+
+
+ 
+
+
+
+
+
+
+
+
+
+
+Al Quran
+
+
+
+Duas
+
+
+
+Special Islamic Days
+
+
+
+Islamic Gallery
+
+
+
+Calendar
+
+
+
+Hadith
+
+
+
+Qibla Direction
+
+
+
+Islamic Places
+
+
+
+Date Converter
+
+
+
+Prayer Widgets
+
+
+
+Zakat Calculator
+
+
+
+Knowledge
+
+
+
+IslamicFinder News
+
+
+
+PrayerBook
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  Prayer Times 
+Egypt
+
+
+				Prayer Times in 
+				
+					
+					
+					
+		    			Cairo
+		    		
+				
+			
+
+
+
+Prayer Times TodayPrayer Times Today in Cairo, Cairo Governorate Egypt are Fajar Prayer Time 03:53 AM, Dhuhur Prayer Time 11:55 AM, Asr Prayer Time 03:30 PM, Maghrib Prayer Time 06:25 PM & Isha Prayer Time 07:47 PM. Get the most accurate Cairo Azan and Namaz times with both; weekly Salat timings and monthly Salah timetable.Offering daily prayer (Salat) is one of the most vital and essential duties that have to be performed as well as fulfilled by all Muslims worldwide. All your problems are going to be solved when you offer your prayers at the right salat time and Allah’s (SWT) blessings will always be on you. You can print the Islamic Calendar 2024 and namaz timetable of prayer times in Cairo for the whole year. The Prayer Timings schedule is updated automatically, so you can always find the most authentic and accurate prayer timings and Ramadan Calendar 2024 for the month of Ramadan 2024. You can also download the Athan App for prayer timings to view all namaz times anywhere, anytime. The Athan app also gives you a chance to log your PrayerBook and notifies you to view your prayer history with ease all the time.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+English
+العربية
+Français
+Türkçe
+Bahasa Indonesia
+Bahasa Malay
+Español
+
+
+
+
+
+
+
+
+Terms and Conditions
+Privacy Policies
+
+
+	        	IslamicFinder ©  2025. All rights reserved.
+	        
+
+
+
