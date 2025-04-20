@@ -619,7 +619,7 @@ Calendar on phone
 
 
 Today Hijri Date in Cairo -
-									20 Shawwal,
+									21 Shawwal,
 									1446
 
 
@@ -1214,7 +1214,7 @@ Date Converter
 										Hajj 2025
 
 
-											46 
+											45 
 											Days to go
 										
 
