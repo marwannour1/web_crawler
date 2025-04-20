@@ -13,7 +13,6 @@ elastic-transport==8.17.1
 elasticsearch==9.0.0
 idna==3.10
 kombu==5.5.3
-mpi4py==4.0.3
 prompt_toolkit==3.0.51
 python-dateutil==2.9.0.post0
 PyYAML==6.0.2
