@@ -1,79 +1,74 @@
-#!/usr/bin/env python3
-# filepath: g:\ain_shams\courses\Distributed Computing CSE354\projects\web_crawler\search.py
-
-import argparse
-import json
 from elasticsearch import Elasticsearch
-from crawler_config import CrawlerConfig
+import hashlib
+import logging
 
 def search_content(query, config_file='crawler_config.json'):
     """Search indexed content using Elasticsearch"""
+    from crawler_config import CrawlerConfig
 
-    # Load configuration
-    config = CrawlerConfig(config_file).get_config()
+    # Set up logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
 
-    # Connect to Elasticsearch
-    es_host = config.get('elasticsearch_url', 'http://localhost:9200')
-    index_name = config.get('elasticsearch_index', 'webcrawler')
+    try:
+        # Load configuration
+        config = CrawlerConfig(config_file).get_config()
 
-    es = Elasticsearch([es_host])
+        # Connect to Elasticsearch
+        es_host = config.get('elasticsearch_url', 'http://localhost:9200')
+        es_user = config.get('elasticsearch_user', 'elastic')
+        es_pass = config.get('elasticsearch_password', 'elastic')
+        index_name = config.get('elasticsearch_index', 'webcrawler')
 
-    # Build search query
-    search_query = {
-        "query": {
-            "multi_match": {
-                "query": query,
-                "fields": ["title^2", "description^1.5", "text_content"],
-                "type": "best_fields"
-            }
-        },
-        "highlight": {
-            "fields": {
-                "title": {},
-                "description": {},
-                "text_content": {"fragment_size": 150, "number_of_fragments": 3}
-            }
-        },
-        "_source": ["url", "title", "description", "crawl_timestamp"],
-        "size": 10
-    }
+        # Create ES connection with authentication
+        es = Elasticsearch(
+            [es_host],
+            http_auth=(es_user, es_pass)
+        )
 
-    # Execute search
-    response = es.search(index=index_name, body=search_query)
-
-    # Format results
-    results = []
-    for hit in response["hits"]["hits"]:
-        result = {
-            "score": hit["_score"],
-            "url": hit["_source"]["url"],
-            "title": hit["_source"]["title"],
-            "description": hit["_source"]["description"],
-            "highlights": hit.get("highlight", {})
+        # Build search query
+        search_query = {
+            "query": {
+                "multi_match": {
+                    "query": query,
+                    "fields": ["title^2", "description^1.5", "text_content"],
+                    "type": "best_fields"
+                }
+            },
+            "highlight": {
+                "fields": {
+                    "title": {},
+                    "description": {},
+                    "text_content": {"fragment_size": 150, "number_of_fragments": 3}
+                }
+            },
+            "_source": ["url", "title", "description", "crawl_timestamp"],
+            "size": 10
         }
-        results.append(result)
 
-    return results
+        # Check if index exists
+        if not es.indices.exists(index=index_name):
+            logger.warning(f"Index {index_name} does not exist yet. No content has been indexed.")
+            return []
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Search web crawler content')
-    parser.add_argument('query', help='Search query')
-    parser.add_argument('--config', default='crawler_config.json', help='Path to config file')
+        # Execute search
+        response = es.search(index=index_name, body=search_query)
 
-    args = parser.parse_args()
+        # Format results
+        results = []
+        for hit in response["hits"]["hits"]:
+            result = {
+                "score": hit["_score"],
+                "url": hit["_source"]["url"],
+                "title": hit["_source"]["title"],
+                "description": hit["_source"]["description"],
+                "highlights": hit.get("highlight", {})
+            }
+            results.append(result)
 
-    results = search_content(args.query, args.config)
+        return results
 
-    print(f"Found {len(results)} results for '{args.query}':\n")
-
-    for i, result in enumerate(results, 1):
-        print(f"{i}. {result['title']} (Score: {result['score']:.2f})")
-        print(f"   URL: {result['url']}")
-        print(f"   Description: {result['description'][:100]}...")
-
-        if "text_content" in result["highlights"]:
-            print("   Highlights:")
-            for fragment in result["highlights"]["text_content"]:
-                print(f"   - ...{fragment}...")
-
-        print()
+    except Exception as e:
+        logger.error(f"Error searching: {e}")
+        # For file fallback, you could search in actual files if needed
+        return []
