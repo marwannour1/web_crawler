@@ -15,6 +15,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+try:
+    from distributed_config import ELASTICSEARCH_URL, NODE_TYPE
+    DISTRIBUTED_MODE = True
+    logger.info(f"Running in distributed mode as {NODE_TYPE} node")
+except ImportError:
+    DISTRIBUTED_MODE = False
+    NODE_TYPE = "local"
+    logger.info("Running in local mode")
+
 @app.task(bind=True, name='tasks.crawl')
 def crawl(self, url, depth=0, config=None):
     """Crawler task that fetches web pages"""
@@ -104,11 +114,16 @@ def index(content, url, config):
 
     try:
         # Connect to Elasticsearch
-        es_host = config.get('elasticsearch_url', 'http://localhost:9200')
+        if DISTRIBUTED_MODE:
+            es_host = ELASTICSEARCH_URL
+            logger.info(f"Using distributed Elasticsearch at {es_host}")
+        else:
+            es_host = config.get('elasticsearch_url', 'http://localhost:9200')
+
         es_user = config.get('elasticsearch_user', 'elastic')
         es_pass = config.get('elasticsearch_password', 'elastic')
 
-# Create the connection with authentication
+        # Create the connection with authentication
         es = Elasticsearch(
             [es_host],
             http_auth=(es_user, es_pass)
@@ -141,7 +156,7 @@ def index(content, url, config):
         logger.info(f"Indexed content in Elasticsearch: {url}")
 
         # For backward compatibility, also save to file if needed
-        if config.get('save_to_file', True):
+        if config.get('save_to_file', True) and (not DISTRIBUTED_MODE or NODE_TYPE == 'indexer'):
             # Setup output directory
             output_dir = config['output_dir']
             os.makedirs(output_dir, exist_ok=True)

@@ -1,10 +1,20 @@
-broker_url = 'redis://localhost:6379/0'
-result_backend = 'redis://localhost:6379/0'
+try:
+    from distributed_config import CELERY_BROKER, CELERY_BACKEND
+    # Use distributed configuration if available
+    broker_url = CELERY_BROKER
+    result_backend = CELERY_BACKEND
+except ImportError:
+    # Fallback to local configuration
+    broker_url = 'redis://localhost:6379/0'
+    result_backend = 'redis://localhost:6379/0'
+
 task_serializer = 'json'
 result_serializer = 'json'
 accept_content = ['json']
 enable_utc = True
-worker_concurrency = 4  # Number of concurrent worker processes
+worker_concurrency = 4  # Will be overridden in run_workers.py
+
+# Task routing ensures tasks go to the right queue
 task_routes = {
     'tasks.crawl': {'queue': 'crawler'},
     'tasks.index': {'queue': 'indexer'},
