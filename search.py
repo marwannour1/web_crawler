@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-# filepath: g:\ain_shams\courses\Distributed Computing CSE354\projects\web_crawler\search.py
 
 from elasticsearch import Elasticsearch
+from elasticsearch.connection import RequestsHttpConnection
 import hashlib
 import logging
 import os
@@ -13,39 +13,55 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def search_content(query, config_file='crawler_config.json'):
-    """Search indexed content using Elasticsearch"""
+    """Search indexed content using Elasticsearch or OpenSearch"""
     from crawler_config import CrawlerConfig
 
     try:
         # Try to use distributed config if available
         try:
-            from distributed_config import ELASTICSEARCH_URL, NODE_TYPE
+            from distributed_config import ELASTICSEARCH_URL, OPENSEARCH_ENDPOINT, OPENSEARCH_USER, OPENSEARCH_PASS
             es_host = ELASTICSEARCH_URL
-            logger.info(f"Using distributed Elasticsearch at {es_host}")
+            es_user = OPENSEARCH_USER
+            es_pass = OPENSEARCH_PASS
+            use_aws = bool(OPENSEARCH_ENDPOINT)
+            logger.info(f"Using distributed search at {es_host}")
             distributed_mode = True
         except ImportError:
             # Load from standard config
             distributed_mode = False
+            use_aws = False
             logger.info("Using local configuration")
 
         # Load configuration
         config = CrawlerConfig(config_file).get_config()
 
-        # Connect to Elasticsearch
+        # Connect to Elasticsearch or OpenSearch
         if not distributed_mode:
             es_host = config.get('elasticsearch_url', 'http://localhost:9200')
+            es_user = config.get('elasticsearch_user', 'elastic')
+            es_pass = config.get('elasticsearch_password', 'elastic')
+            use_aws = False
 
-        es_user = config.get('elasticsearch_user', 'elastic')
-        es_pass = config.get('elasticsearch_password', 'elastic')
         index_name = config.get('elasticsearch_index', 'webcrawler')
 
-        logger.info(f"Connecting to Elasticsearch at {es_host}")
+        logger.info(f"Connecting to search service at {es_host}")
 
         # Create ES connection with authentication
-        es = Elasticsearch(
-            [es_host],
-            http_auth=(es_user, es_pass)
-        )
+        if use_aws:
+            # AWS OpenSearch connection
+            es = Elasticsearch(
+                hosts=[es_host],
+                http_auth=(es_user, es_pass),
+                use_ssl=es_host.startswith('https'),
+                verify_certs=True,
+                connection_class=RequestsHttpConnection
+            )
+        else:
+            # Standard Elasticsearch connection
+            es = Elasticsearch(
+                [es_host],
+                http_auth=(es_user, es_pass)
+            )
 
         # Build search query
         search_query = {

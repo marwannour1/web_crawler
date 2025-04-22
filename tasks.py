@@ -8,6 +8,7 @@ import logging
 from celery_app import app
 import json
 from elasticsearch import Elasticsearch
+from elasticsearch.connection import RequestsHttpConnection
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,11 +18,15 @@ logger = logging.getLogger(__name__)
 
 
 try:
-    from distributed_config import ELASTICSEARCH_URL, NODE_TYPE
+    from distributed_config import ELASTICSEARCH_URL, NODE_TYPE, OPENSEARCH_ENDPOINT
     DISTRIBUTED_MODE = True
+    USE_AWS_OPENSEARCH = bool(OPENSEARCH_ENDPOINT)
     logger.info(f"Running in distributed mode as {NODE_TYPE} node")
+    if USE_AWS_OPENSEARCH:
+        logger.info(f"Using AWS OpenSearch Service at {OPENSEARCH_ENDPOINT}")
 except ImportError:
     DISTRIBUTED_MODE = False
+    USE_AWS_OPENSEARCH = False
     NODE_TYPE = "local"
     logger.info("Running in local mode")
 
@@ -109,25 +114,47 @@ def crawl(self, url, depth=0, config=None):
 
 @app.task(name='tasks.index')
 def index(content, url, config):
-    """Indexer task that processes and indexes web content using Elasticsearch"""
+    """Indexer task that processes and indexes web content using Elasticsearch/OpenSearch"""
     logger.info(f"Indexer processing content from: {url}")
 
+    success = False
+    error_message = None
+
     try:
-        # Connect to Elasticsearch
+        # Connect to Elasticsearch or AWS OpenSearch
         if DISTRIBUTED_MODE:
             es_host = ELASTICSEARCH_URL
-            logger.info(f"Using distributed Elasticsearch at {es_host}")
+            logger.info(f"Using distributed search service at {es_host}")
+
+            # Get credentials from distributed config if available
+            try:
+                from distributed_config import OPENSEARCH_USER, OPENSEARCH_PASS
+                es_user = OPENSEARCH_USER
+                es_pass = OPENSEARCH_PASS
+            except ImportError:
+                es_user = config.get('elasticsearch_user', 'elastic')
+                es_pass = config.get('elasticsearch_password', 'elastic')
         else:
             es_host = config.get('elasticsearch_url', 'http://localhost:9200')
-
-        es_user = config.get('elasticsearch_user', 'elastic')
-        es_pass = config.get('elasticsearch_password', 'elastic')
+            es_user = config.get('elasticsearch_user', 'elastic')
+            es_pass = config.get('elasticsearch_password', 'elastic')
 
         # Create the connection with authentication
-        es = Elasticsearch(
-            [es_host],
-            http_auth=(es_user, es_pass)
-        )
+        if USE_AWS_OPENSEARCH:
+            # AWS OpenSearch connection
+            es = Elasticsearch(
+                hosts=[es_host],
+                http_auth=(es_user, es_pass),
+                use_ssl=es_host.startswith('https'),
+                verify_certs=True,
+                connection_class=RequestsHttpConnection
+            )
+        else:
+            # Standard Elasticsearch connection
+            es = Elasticsearch(
+                [es_host],
+                http_auth=(es_user, es_pass)
+            )
 
         # Create index if it doesn't exist
         index_name = config.get('elasticsearch_index', 'webcrawler')
@@ -147,13 +174,14 @@ def index(content, url, config):
                 }
             }
             es.indices.create(index=index_name, body=mapping)
-            logger.info(f"Created Elasticsearch index: {index_name}")
+            logger.info(f"Created search index: {index_name}")
 
         # Index the document
         doc_id = hashlib.md5(url.encode()).hexdigest()
         es.index(index=index_name, id=doc_id, body=content)
 
-        logger.info(f"Indexed content in Elasticsearch: {url}")
+        logger.info(f"Indexed content in search service: {url}")
+        success = True
 
         # For backward compatibility, also save to file if needed
         if config.get('save_to_file', True) and (not DISTRIBUTED_MODE or NODE_TYPE == 'indexer'):
@@ -187,4 +215,27 @@ def index(content, url, config):
 
     except Exception as e:
         logger.error(f"Error indexing content from {url}: {e}")
-        return {'status': 'error', 'url': url, 'error': str(e)}
+        error_message = str(e)
+
+        # Try to save to file anyway if Elasticsearch fails
+        try:
+            if config.get('save_to_file', True):
+                output_dir = config['output_dir']
+                os.makedirs(output_dir, exist_ok=True)
+
+                index_dir = os.path.join(output_dir, "indexer_worker")
+                os.makedirs(index_dir, exist_ok=True)
+
+                filename = hashlib.md5(url.encode()).hexdigest() + ".txt"
+                filepath = os.path.join(index_dir, filename)
+
+                formatted_content = f"URL: {content['url']}\nTitle: {content['title']}\nDescription: {content['description']}\n\n{content['text_content']}"
+
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    f.write(formatted_content)
+
+                logger.info(f"Saved content to file despite indexing error: {filepath}")
+        except Exception as file_error:
+            logger.error(f"Error saving to file: {file_error}")
+
+        return {'status': 'error', 'url': url, 'error': error_message}

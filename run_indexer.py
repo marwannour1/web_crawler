@@ -31,18 +31,18 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
     """Simple HTTP handler for health checks"""
     def do_GET(self):
         if self.path == '/health':
-            # Check if Elasticsearch is running
+            # Check if Elasticsearch/OpenSearch is available
             es_status = check_elasticsearch()
             if es_status:
                 self.send_response(200)
                 self.send_header('Content-type', 'text/plain')
                 self.end_headers()
-                self.wfile.write(b"Indexer node is running with Elasticsearch")
+                self.wfile.write(b"Indexer node is running with search service")
             else:
                 self.send_response(503)  # Service Unavailable
                 self.send_header('Content-type', 'text/plain')
                 self.end_headers()
-                self.wfile.write(b"Elasticsearch not available")
+                self.wfile.write(b"Search service not available")
         else:
             self.send_response(404)
             self.end_headers()
@@ -52,11 +52,32 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         return
 
 def check_elasticsearch():
-    """Check if Elasticsearch is running"""
+    """Check if Elasticsearch or AWS OpenSearch is running"""
     try:
-        response = requests.get('http://localhost:9200/_cluster/health', timeout=5)
-        return response.status_code == 200
-    except:
+        # Try to import specific configuration
+        try:
+            from distributed_config import OPENSEARCH_ENDPOINT, OPENSEARCH_USER, OPENSEARCH_PASS
+
+            if OPENSEARCH_ENDPOINT:
+                # AWS OpenSearch health check
+                response = requests.get(
+                    f"{OPENSEARCH_ENDPOINT}/_cluster/health",
+                    auth=(OPENSEARCH_USER, OPENSEARCH_PASS),
+                    timeout=5,
+                    verify=True
+                )
+                logger.info(f"AWS OpenSearch health check: {response.status_code}")
+                return response.status_code == 200
+            else:
+                # Local Elasticsearch health check
+                response = requests.get('http://localhost:9200/_cluster/health', timeout=5)
+                return response.status_code == 200
+        except ImportError:
+            # Local Elasticsearch health check (fallback)
+            response = requests.get('http://localhost:9200/_cluster/health', timeout=5)
+            return response.status_code == 200
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
         return False
 
 def start_health_server():
@@ -109,10 +130,22 @@ def main():
     """Main function for indexer node"""
     logger.info("Starting Indexer Node")
 
-    # Check Elasticsearch
-    if not check_elasticsearch():
-        logger.warning("Elasticsearch is not running or not accessible.")
-        logger.warning("Indexer workers will start anyway but may fail.")
+    # Check if using AWS OpenSearch
+    try:
+        from distributed_config import OPENSEARCH_ENDPOINT
+        using_aws = bool(OPENSEARCH_ENDPOINT)
+        if using_aws:
+            logger.info(f"Using AWS OpenSearch Service at {OPENSEARCH_ENDPOINT}")
+        else:
+            # Check local Elasticsearch
+            if not check_elasticsearch():
+                logger.warning("Elasticsearch is not running or not accessible.")
+                logger.warning("Indexer workers will start anyway but may fail.")
+    except ImportError:
+        # Check local Elasticsearch as fallback
+        if not check_elasticsearch():
+            logger.warning("Elasticsearch is not running or not accessible.")
+            logger.warning("Indexer workers will start anyway but may fail.")
 
     # Start health server in a background thread
     health_thread = threading.Thread(target=start_health_server)
