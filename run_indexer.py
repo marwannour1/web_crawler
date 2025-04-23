@@ -11,10 +11,9 @@ import signal
 import logging
 import subprocess
 import threading
-import requests
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from crawler_config import CrawlerConfig
-from distributed_config import REDIS_URL, NODE_TYPE
+from distributed_config import NODE_TYPE  # Remove REDIS_URL, only import NODE_TYPE
 
 # Set up logging
 logging.basicConfig(
@@ -90,11 +89,11 @@ def start_health_server():
         logger.error(f"Failed to start health server: {e}")
 
 def start_indexer_workers():
-    """Start indexer workers connecting to the master's Redis"""
+    """Start indexer workers connecting to AWS SQS"""
     config = CrawlerConfig().get_config()
     num_workers = config.get('num_indexers', 2)
 
-    logger.info(f"Starting {num_workers} indexer workers connected to {REDIS_URL}")
+    logger.info(f"Starting {num_workers} indexer workers connected to AWS SQS")
 
     env = os.environ.copy()
     env['PYTHONPATH'] = os.path.abspath(os.path.dirname(__file__))
