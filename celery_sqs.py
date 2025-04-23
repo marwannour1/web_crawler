@@ -17,18 +17,23 @@ from aws_config import (
     DYNAMODB_TABLE_NAME
 )
 
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def create_celery_app():
     """Create and configure a Celery app using SQS and DynamoDB"""
-
+    from aws_config import get_crawler_queue_url, get_indexer_queue_url
     # SQS broker URL
     broker_url = f"sqs://{AWS_ACCESS_KEY}:{AWS_SECRET_KEY}@"
 
     # Create Celery app
     app = Celery('webcrawler', broker=broker_url)
+
+    #Get queue URLs
+    crawler_queue_url = get_crawler_queue_url()
+    indexer_queue_url = get_indexer_queue_url()
 
     # Configure Celery to use SQS
     app.conf.update(
@@ -38,10 +43,12 @@ def create_celery_app():
                 'crawler': {
                     'name': SQS_CRAWLER_QUEUE_NAME,
                     'visibility_timeout': 300,  # 5 minutes
+                    'url': crawler_queue_url
                 },
                 'indexer': {
                     'name': SQS_INDEXER_QUEUE_NAME,
                     'visibility_timeout': 300,
+                    'url': indexer_queue_url
                 }
             }
         },
