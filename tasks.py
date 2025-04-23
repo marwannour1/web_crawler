@@ -7,8 +7,8 @@ import os
 import logging
 from celery_app import app
 import json
-from elasticsearch import Elasticsearch
-from elasticsearch.connection import RequestsHttpConnection
+from elasticsearch import Elasticsearch, RequestsHttpConnection
+from requests_aws4auth import AWS4Auth
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 try:
-    from distributed_config import ELASTICSEARCH_URL, NODE_TYPE, OPENSEARCH_ENDPOINT
+    from distributed_config import ELASTICSEARCH_URL, NODE_TYPE, OPENSEARCH_ENDPOINT, AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
     DISTRIBUTED_MODE = True
     USE_AWS_OPENSEARCH = bool(OPENSEARCH_ENDPOINT)
     logger.info(f"Running in distributed mode as {NODE_TYPE} node")
@@ -102,7 +102,7 @@ def crawl(self, url, depth=0, config=None):
             'description': description,
             'text_content': text_content,
             'html': response.text,  # Include raw HTML for Elasticsearch to process
-            'crawl_timestamp': time.time(),
+            'crawl_timestamp': int(time.time()),  # Use integers for ES 7.1
             'depth': depth
         }
         # Schedule indexing task
@@ -156,14 +156,26 @@ def index(content, url, config):
 
         # Create the connection with authentication
         if USE_AWS_OPENSEARCH:
-            # AWS OpenSearch connection
-            es = Elasticsearch(
-                hosts=[es_host],
-                http_auth=(es_user, es_pass),
-                use_ssl=es_host.startswith('https'),
-                verify_certs=True,
-                connection_class=RequestsHttpConnection
-            )
+            # AWS OpenSearch connection - using AWS4Auth for Amazon OpenSearch Service
+            try:
+                # Try to use AWS4Auth if available (for OpenSearch)
+                aws_auth = AWS4Auth(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, 'es')
+                es = Elasticsearch(
+                    hosts=[es_host],
+                    http_auth=aws_auth,
+                    use_ssl=es_host.startswith('https'),
+                    verify_certs=True,
+                    connection_class=RequestsHttpConnection
+                )
+            except (ImportError, NameError):
+                # Fall back to basic auth if AWS4Auth is not available
+                es = Elasticsearch(
+                    hosts=[es_host],
+                    http_auth=(es_user, es_pass),
+                    use_ssl=es_host.startswith('https'),
+                    verify_certs=True,
+                    connection_class=RequestsHttpConnection
+                )
         else:
             # Standard Elasticsearch connection
             es = Elasticsearch(
@@ -175,7 +187,7 @@ def index(content, url, config):
         index_name = config.get('elasticsearch_index', 'webcrawler')
 
         if not es.indices.exists(index=index_name):
-            # Define mapping for better text search
+            # Define mapping for better text search - ES 7.1 compatible
             mapping = {
                 "mappings": {
                     "properties": {
@@ -191,7 +203,7 @@ def index(content, url, config):
             es.indices.create(index=index_name, body=mapping)
             logger.info(f"Created search index: {index_name}")
 
-        # Index the document
+        # Index the document - ES 7.1 compatible
         doc_id = hashlib.md5(url.encode()).hexdigest()
         es.index(index=index_name, id=doc_id, body=content)
 
