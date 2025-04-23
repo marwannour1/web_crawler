@@ -13,9 +13,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Node IP addresses - still useful for health checks
-MASTER_IP = "172.31.25.56"
-CRAWLER_IP = "172.31.18.178"
-INDEXER_IP = "172.31.21.25"
+MASTER_IP = "172.31.21.220"
+CRAWLER_IP = "172.31.23.169"
+INDEXER_IP = "172.31.20.112"
 
 # AWS OpenSearch Service configuration
 OPENSEARCH_ENDPOINT = os.environ.get("OPENSEARCH_ENDPOINT", "")
