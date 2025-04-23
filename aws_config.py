@@ -175,8 +175,17 @@ def setup_aws_resources():
 
     return success
 
+
+def ensure_aws_clients():
+    """Ensure AWS clients are initialized before using them"""
+    global sqs_client, dynamodb_client, s3_client
+    if sqs_client is None or dynamodb_client is None or s3_client is None:
+        return init_aws_clients()
+    return True
+
 def get_queue_url(queue_name):
     """Get the URL for a queue"""
+    ensure_aws_clients()
     try:
         response = sqs_client.get_queue_url(QueueName=queue_name)
         return response['QueueUrl']

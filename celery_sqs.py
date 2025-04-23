@@ -35,6 +35,9 @@ def create_celery_app():
     crawler_queue_url = get_crawler_queue_url()
     indexer_queue_url = get_indexer_queue_url()
 
+    if not crawler_queue_url or not indexer_queue_url:
+        logger.error("Failed to get SQS queue URLs")
+        return None
     # Configure Celery to use SQS
     app.conf.update(
         broker_transport_options={
