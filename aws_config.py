@@ -99,6 +99,7 @@ def setup_aws_resources():
         success = False
 
     # Create DynamoDB table for results
+    # Create DynamoDB table for results
     try:
         try:
             dynamodb_client.describe_table(TableName=DYNAMODB_TABLE_NAME)
@@ -117,13 +118,27 @@ def setup_aws_resources():
                     ProvisionedThroughput={
                         'ReadCapacityUnits': 5,
                         'WriteCapacityUnits': 5
-                    },
-                    TimeToLiveSpecification={
-                        'Enabled': True,
-                        'AttributeName': 'expires_at'
                     }
                 )
                 logger.info(f"DynamoDB table created: {DYNAMODB_TABLE_NAME}")
+
+                # Wait for table to become available
+                logger.info("Waiting for table to become active...")
+                waiter = dynamodb_client.get_waiter('table_exists')
+                waiter.wait(TableName=DYNAMODB_TABLE_NAME)
+
+                # Now enable TTL as a separate operation
+                try:
+                    dynamodb_client.update_time_to_live(
+                        TableName=DYNAMODB_TABLE_NAME,
+                        TimeToLiveSpecification={
+                            'Enabled': True,
+                            'AttributeName': 'expires_at'
+                        }
+                    )
+                    logger.info(f"TTL enabled for table: {DYNAMODB_TABLE_NAME}")
+                except ClientError as ttl_error:
+                    logger.warning(f"Could not enable TTL: {ttl_error}")
             else:
                 raise
     except ClientError as e:
