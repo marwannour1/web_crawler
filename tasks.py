@@ -156,10 +156,23 @@ def index(content, url, config):
 
         # Create the connection with authentication
         if USE_AWS_OPENSEARCH:
-            # AWS OpenSearch connection - using AWS4Auth for Amazon OpenSearch Service
+    # Determine if we should use AWS4Auth or basic auth
+            auth_method = "aws4auth"  # Default to AWS4Auth
             try:
-                # Try to use AWS4Auth if available (for OpenSearch)
-                aws_auth = AWS4Auth(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, 'es')
+                # Try to read from helper file if it exists
+                with open("opensearch_auth_method.txt", "r") as f:
+                    auth_method = f.read().strip()
+            except (FileNotFoundError, IOError):
+                pass
+
+            if auth_method == "aws4auth":
+                # Use AWS4Auth (preferred for AWS OpenSearch)
+                aws_auth = AWS4Auth(
+                    AWS_ACCESS_KEY_ID,
+                    AWS_SECRET_ACCESS_KEY,
+                    AWS_REGION,
+                    'es'
+                )
                 es = Elasticsearch(
                     hosts=[es_host],
                     http_auth=aws_auth,
@@ -167,8 +180,8 @@ def index(content, url, config):
                     verify_certs=True,
                     connection_class=RequestsHttpConnection
                 )
-            except (ImportError, NameError):
-                # Fall back to basic auth if AWS4Auth is not available
+            else:
+                # Fall back to basic auth
                 es = Elasticsearch(
                     hosts=[es_host],
                     http_auth=(es_user, es_pass),
@@ -176,12 +189,6 @@ def index(content, url, config):
                     verify_certs=True,
                     connection_class=RequestsHttpConnection
                 )
-        else:
-            # Standard Elasticsearch connection
-            es = Elasticsearch(
-                [es_host],
-                http_auth=(es_user, es_pass)
-            )
 
         # Create index if it doesn't exist
         index_name = config.get('elasticsearch_index', 'webcrawler')

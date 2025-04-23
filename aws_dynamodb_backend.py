@@ -72,10 +72,10 @@ class DynamoDBBackend(KeyValueStoreBackend):
             self.client.create_table(
                 TableName=self.table_name,
                 KeySchema=[
-                    {'AttributeName': 'task_id', 'KeyType': 'HASH'}
+                    {'AttributeName': 'id', 'KeyType': 'HASH'}
                 ],
                 AttributeDefinitions=[
-                    {'AttributeName': 'task_id', 'AttributeType': 'S'}
+                    {'AttributeName': 'id', 'AttributeType': 'S'}
                 ],
                 ProvisionedThroughput={
                     'ReadCapacityUnits': 5,
@@ -112,7 +112,7 @@ class DynamoDBBackend(KeyValueStoreBackend):
 
             # Store in DynamoDB
             item = {
-                'task_id': {'S': key},
+                'id': {'S': key},
                 'state': {'S': state},
                 'result': {'S': result} if result else {'NULL': True},
                 'expires_at': {'N': str(expires_at)}
@@ -136,7 +136,7 @@ class DynamoDBBackend(KeyValueStoreBackend):
         try:
             response = self.client.get_item(
                 TableName=self.table_name,
-                Key={'task_id': {'S': key}}
+                Key={'id': {'S': key}}
             )
 
             if 'Item' not in response:
@@ -162,7 +162,7 @@ class DynamoDBBackend(KeyValueStoreBackend):
         try:
             self.client.delete_item(
                 TableName=self.table_name,
-                Key={'task_id': {'S': key}}
+                Key={'id': {'S': key}}
             )
             return True
         except Exception as e:
