@@ -10,6 +10,7 @@ import time
 import signal
 import logging
 import subprocess
+import requests
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from crawler_config import CrawlerConfig
