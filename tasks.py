@@ -30,6 +30,15 @@ except ImportError:
     NODE_TYPE = "local"
     logger.info("Running in local mode")
 
+# Import S3 storage if available
+try:
+    from s3_storage import save_to_s3, check_content_exists
+    USE_S3_STORAGE = True
+    logger.info("Using S3 for content storage")
+except ImportError:
+    USE_S3_STORAGE = False
+    logger.info("S3 storage not available, using file system")
+
 @app.task(bind=True, name='tasks.crawl')
 def crawl(self, url, depth=0, config=None):
     """Crawler task that fetches web pages"""
@@ -38,15 +47,21 @@ def crawl(self, url, depth=0, config=None):
 
     logger.info(f"Crawler {self.request.id} processing URL: {url} (depth {depth})")
 
-    # Create a unique filename for this URL to check if it was already processed
+    # Check if URL was already processed (either in S3 or file system)
     url_hash = hashlib.md5(url.encode()).hexdigest()
-    output_dir = config['output_dir']
-    check_path = os.path.join(output_dir, f"indexer_worker/{url_hash}.txt")
 
-    # If the file exists, this URL was already crawled
-    if os.path.exists(check_path):
-        logger.info(f"URL already processed, skipping: {url}")
-        return {'status': 'skipped', 'url': url, 'reason': 'already_processed'}
+    # Check if content already exists
+    if USE_S3_STORAGE:
+        if check_content_exists(url):
+            logger.info(f"URL already processed in S3, skipping: {url}")
+            return {'status': 'skipped', 'url': url, 'reason': 'already_processed'}
+    else:
+        # Fall back to file check
+        output_dir = config['output_dir']
+        check_path = os.path.join(output_dir, f"indexer_worker/{url_hash}.txt")
+        if os.path.exists(check_path):
+            logger.info(f"URL already processed in file system, skipping: {url}")
+            return {'status': 'skipped', 'url': url, 'reason': 'already_processed'}
 
     try:
         # Add delay to prevent overloading servers
@@ -183,8 +198,22 @@ def index(content, url, config):
         logger.info(f"Indexed content in search service: {url}")
         success = True
 
+        # Store content in S3 if available, otherwise fall back to file storage
+        if USE_S3_STORAGE:
+            # Save to S3
+            s3_key = save_to_s3(content, url)
+            if s3_key:
+                logger.info(f"Saved content to S3: {url} -> {s3_key}")
+                success = True
+            else:
+                logger.error(f"Failed to save content to S3: {url}")
+                # Fall back to file storage
+                use_file_storage = True
+        else:
+            use_file_storage = True
+
         # For backward compatibility, also save to file if needed
-        if config.get('save_to_file', True) and (not DISTRIBUTED_MODE or NODE_TYPE == 'indexer'):
+        if config.get('save_to_file', True) and (not DISTRIBUTED_MODE or NODE_TYPE == 'indexer' or not USE_S3_STORAGE):
             # Setup output directory
             output_dir = config['output_dir']
             os.makedirs(output_dir, exist_ok=True)
@@ -204,7 +233,7 @@ def index(content, url, config):
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(formatted_content)
 
-            logger.info(f"Also saved content to file: {filepath}")
+            logger.info(f"Saved content to file: {filepath}")
 
         return {
             'status': 'success',
