@@ -79,27 +79,69 @@ def fix_dynamodb_table():
 
         # Check if table exists
         try:
-            dynamodb_client.describe_table(TableName=DYNAMODB_TABLE_NAME)
+            response = dynamodb_client.describe_table(TableName=DYNAMODB_TABLE_NAME)
             logger.info(f"Table {DYNAMODB_TABLE_NAME} exists, checking schema...")
 
-            # We're simply going to recreate the table to ensure correct schema
+            # Check if the table has the correct schema
+            # Look for 'id' attribute and 'expires' TTL
+            try:
+                ttl_response = dynamodb_client.describe_time_to_live(
+                    TableName=DYNAMODB_TABLE_NAME
+                )
+
+                has_correct_ttl = (
+                    'TimeToLiveDescription' in ttl_response and
+                    ttl_response['TimeToLiveDescription'].get('AttributeName') == 'expires' and
+                    ttl_response['TimeToLiveDescription'].get('TimeToLiveStatus') == 'ENABLED'
+                )
+
+                # If table has correct schema, just return
+                if has_correct_ttl:
+                    logger.info(f"Table {DYNAMODB_TABLE_NAME} has correct schema, no changes needed")
+                    return True
+                else:
+                    logger.info(f"Table {DYNAMODB_TABLE_NAME} has incorrect schema, updating TTL")
+                    # Just update the TTL instead of recreating
+                    dynamodb_client.update_time_to_live(
+                        TableName=DYNAMODB_TABLE_NAME,
+                        TimeToLiveSpecification={
+                            'Enabled': True,
+                            'AttributeName': 'expires'
+                        }
+                    )
+                    logger.info(f"Updated TTL for {DYNAMODB_TABLE_NAME}")
+                    return True
+            except Exception as e:
+                logger.warning(f"Error checking TTL: {e}. Will recreate table.")
+                # Continue to recreation
+
+        except ClientError as e:
+            if e.response['Error']['Code'] != 'ResourceNotFoundException':
+                logger.error(f"Error checking table: {e}")
+                return False
+            logger.info(f"Table {DYNAMODB_TABLE_NAME} does not exist, will create it")
+
+        # Only get here if table doesn't exist or needs to be recreated
+
+        # If table exists, delete it first
+        try:
+            dynamodb_client.describe_table(TableName=DYNAMODB_TABLE_NAME)
+            logger.info(f"Deleting existing table {DYNAMODB_TABLE_NAME} to recreate with correct schema")
             dynamodb_client.delete_table(TableName=DYNAMODB_TABLE_NAME)
 
             # Wait for the table to be deleted
             waiter = dynamodb_client.get_waiter('table_not_exists')
             waiter.wait(TableName=DYNAMODB_TABLE_NAME)
             logger.info(f"Table {DYNAMODB_TABLE_NAME} deleted successfully")
-
         except ClientError as e:
             if e.response['Error']['Code'] != 'ResourceNotFoundException':
-                logger.error(f"Error checking table: {e}")
-                return False
+                logger.error(f"Error deleting table: {e}")
 
         # Create the table with the correct schema for Celery
         dynamodb_client.create_table(
             TableName=DYNAMODB_TABLE_NAME,
             KeySchema=[
-                {'AttributeName': 'id', 'KeyType': 'HASH'},  # Use 'id' instead of 'task_id'
+                {'AttributeName': 'id', 'KeyType': 'HASH'},
             ],
             AttributeDefinitions=[
                 {'AttributeName': 'id', 'AttributeType': 'S'},
@@ -119,7 +161,7 @@ def fix_dynamodb_table():
             TableName=DYNAMODB_TABLE_NAME,
             TimeToLiveSpecification={
                 'Enabled': True,
-                'AttributeName': 'expires'  # Use 'expires' instead of 'expires_at'
+                'AttributeName': 'expires'
             }
         )
 
