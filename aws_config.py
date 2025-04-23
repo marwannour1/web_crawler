@@ -29,7 +29,7 @@ DYNAMODB_TABLE_NAME = "webcrawler-tasks"
 DYNAMODB_RESULTS_TTL = 86400  # 24 hours in seconds
 
 # S3 Configuration
-S3_BUCKET_NAME = "webcrawler-content"
+S3_BUCKET_NAME = "webcrawler-content-marwan"
 S3_PREFIX = "crawled-pages/"  # Prefix for organizing content in the bucket
 
 # Connection clients
