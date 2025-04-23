@@ -2,7 +2,7 @@
 # filepath: run_indexer.py
 
 """
-Indexer node script: runs Elasticsearch and indexer workers
+Indexer node script: handles content indexing to OpenSearch and S3 storage
 """
 import os
 import sys
@@ -12,9 +12,12 @@ import logging
 import subprocess
 import requests
 import threading
+import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from crawler_config import CrawlerConfig
-from distributed_config import NODE_TYPE  # Remove REDIS_URL, only import NODE_TYPE
+from distributed_config import NODE_TYPE
+from aws_config import setup_aws_resources
+from requests_aws4auth import AWS4Auth
 
 # Set up logging
 logging.basicConfig(
@@ -31,18 +34,59 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
     """Simple HTTP handler for health checks"""
     def do_GET(self):
         if self.path == '/health':
-            # Check if Elasticsearch/OpenSearch is available
-            es_status = check_elasticsearch()
+            # Check if OpenSearch is available
+            es_status = check_opensearch()
             if es_status:
                 self.send_response(200)
-                self.send_header('Content-type', 'text/plain')
+                self.send_header('Content-type', 'application/json')
                 self.end_headers()
-                self.wfile.write(b"Indexer node is running with search service")
+                self.wfile.write(json.dumps({
+                    "status": "ok",
+                    "message": "Indexer node is running with OpenSearch service",
+                    "node_type": NODE_TYPE
+                }).encode())
             else:
                 self.send_response(503)  # Service Unavailable
-                self.send_header('Content-type', 'text/plain')
+                self.send_header('Content-type', 'application/json')
                 self.end_headers()
-                self.wfile.write(b"Search service not available")
+                self.wfile.write(json.dumps({
+                    "status": "error",
+                    "message": "OpenSearch service not available",
+                    "node_type": NODE_TYPE
+                }).encode())
+        elif self.path == '/status':
+            # Return more detailed status information
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+
+            # Get task stats if available
+            task_stats = {"pending": "unknown", "active": "unknown"}
+            try:
+                from celery_app import app
+                inspector = app.control.inspect()
+                active = inspector.active()
+                reserved = inspector.reserved()
+
+                active_count = 0
+                if active:
+                    active_count = sum(len(tasks) for tasks in active.values())
+
+                reserved_count = 0
+                if reserved:
+                    reserved_count = sum(len(tasks) for tasks in reserved.values())
+
+                task_stats = {"active": active_count, "pending": reserved_count}
+            except Exception as e:
+                logger.error(f"Error getting task stats: {e}")
+
+            self.wfile.write(json.dumps({
+                "status": "ok",
+                "node_type": NODE_TYPE,
+                "uptime": time.time() - start_time,
+                "opensearch_status": "available" if check_opensearch() else "unavailable",
+                "task_stats": task_stats
+            }).encode())
         else:
             self.send_response(404)
             self.end_headers()
@@ -51,33 +95,56 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         return
 
-def check_elasticsearch():
-    """Check if Elasticsearch or AWS OpenSearch is running"""
+def check_opensearch():
+    """Check if AWS OpenSearch is running and accessible"""
     try:
         # Try to import specific configuration
         try:
-            from distributed_config import OPENSEARCH_ENDPOINT, OPENSEARCH_USER, OPENSEARCH_PASS
+            from distributed_config import OPENSEARCH_ENDPOINT, AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+            from distributed_config import OPENSEARCH_USER, OPENSEARCH_PASS
 
-            if OPENSEARCH_ENDPOINT:
-                # AWS OpenSearch health check
+            if not OPENSEARCH_ENDPOINT:
+                logger.warning("OpenSearch endpoint not defined")
+                return False
+
+            # Determine authentication method from file if available
+            auth_method = "aws4auth"  # Default
+            try:
+                with open("opensearch_auth_method.txt", "r") as f:
+                    auth_method = f.read().strip()
+            except (FileNotFoundError, IOError):
+                pass
+
+            if auth_method == "aws4auth":
+                # Use AWS4Auth for OpenSearch
+                aws_auth = AWS4Auth(
+                    AWS_ACCESS_KEY_ID,
+                    AWS_SECRET_ACCESS_KEY,
+                    AWS_REGION,
+                    'es'
+                )
+                response = requests.get(
+                    f"{OPENSEARCH_ENDPOINT}/_cluster/health",
+                    auth=aws_auth,
+                    timeout=5,
+                    verify=True
+                )
+            else:
+                # Fall back to basic auth
                 response = requests.get(
                     f"{OPENSEARCH_ENDPOINT}/_cluster/health",
                     auth=(OPENSEARCH_USER, OPENSEARCH_PASS),
                     timeout=5,
                     verify=True
                 )
-                logger.info(f"AWS OpenSearch health check: {response.status_code}")
-                return response.status_code == 200
-            else:
-                # Local Elasticsearch health check
-                response = requests.get('http://localhost:9200/_cluster/health', timeout=5)
-                return response.status_code == 200
-        except ImportError:
-            # Local Elasticsearch health check (fallback)
-            response = requests.get('http://localhost:9200/_cluster/health', timeout=5)
+
+            logger.info(f"OpenSearch health check: {response.status_code}")
             return response.status_code == 200
+        except ImportError as e:
+            logger.error(f"Failed to import OpenSearch configuration: {e}")
+            return False
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
+        logger.error(f"OpenSearch health check failed: {e}")
         return False
 
 def start_health_server():
@@ -126,9 +193,31 @@ def start_indexer_workers():
         worker_process.terminate()
         sys.exit(0)
 
+def setup_opensearch_auth():
+    """Determine the best authentication method for OpenSearch"""
+    try:
+        from opensearch_fix import test_opensearch_connection
+        success, auth_method = test_opensearch_connection()
+        if success:
+            logger.info(f"OpenSearch connection successful using {auth_method} authentication")
+            return True
+        else:
+            logger.warning("Failed to connect to OpenSearch with any authentication method")
+            return False
+    except ImportError as e:
+        logger.error(f"Failed to import opensearch_fix: {e}")
+        return False
+
+# Track start time for uptime monitoring
+start_time = time.time()
+
 def main():
     """Main function for indexer node"""
     logger.info("Starting Indexer Node")
+
+    # Initialize AWS resources
+    if not setup_aws_resources():
+        logger.warning("Some AWS resources could not be initialized")
 
     # Check if using AWS OpenSearch
     try:
@@ -136,16 +225,12 @@ def main():
         using_aws = bool(OPENSEARCH_ENDPOINT)
         if using_aws:
             logger.info(f"Using AWS OpenSearch Service at {OPENSEARCH_ENDPOINT}")
+            # Setup authentication method
+            setup_opensearch_auth()
         else:
-            # Check local Elasticsearch
-            if not check_elasticsearch():
-                logger.warning("Elasticsearch is not running or not accessible.")
-                logger.warning("Indexer workers will start anyway but may fail.")
+            logger.warning("No OpenSearch endpoint configured. Indexing will use S3 only.")
     except ImportError:
-        # Check local Elasticsearch as fallback
-        if not check_elasticsearch():
-            logger.warning("Elasticsearch is not running or not accessible.")
-            logger.warning("Indexer workers will start anyway but may fail.")
+        logger.warning("Distributed configuration not found. Indexing will be limited.")
 
     # Start health server in a background thread
     health_thread = threading.Thread(target=start_health_server)

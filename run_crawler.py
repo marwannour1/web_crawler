@@ -2,7 +2,7 @@
 # filepath: run_crawler.py
 
 """
-Crawler node script: runs crawler workers
+Crawler node script: runs crawler workers to fetch web pages.
 """
 import os
 import sys
@@ -13,7 +13,7 @@ import subprocess
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from crawler_config import CrawlerConfig
-from distributed_config import NODE_TYPE  # Remove REDIS_URL, only import NODE_TYPE
+from distributed_config import NODE_TYPE
 
 # Set up logging
 logging.basicConfig(

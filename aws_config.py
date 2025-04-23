@@ -3,13 +3,18 @@
 
 """
 AWS configuration for the distributed web crawler.
-Contains settings for SQS, DynamoDB, and S3.
+Contains settings for SQS, DynamoDB, S3, and OpenSearch.
+Handles creation of resources and utility functions.
 """
 
 import os
 import boto3
+import time
 import logging
+import json
+import requests
 from botocore.exceptions import ClientError
+from requests_aws4auth import AWS4Auth
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +35,9 @@ DYNAMODB_RESULTS_TTL = 86400  # 24 hours in seconds
 
 # S3 Configuration
 S3_BUCKET_NAME = "webcrawler-content-marwan"
-S3_PREFIX = "crawled-pages/"  # Prefix for organizing content in the bucket
+S3_INPUT_PREFIX = "input/"  # Prefix for input content
+S3_OUTPUT_PREFIX = "output/"  # Prefix for output content
+S3_CONFIG_PREFIX = "config/"  # Prefix for configuration
 
 # Connection clients
 sqs_client = None
@@ -40,6 +47,10 @@ s3_client = None
 def init_aws_clients():
     """Initialize AWS clients with credentials"""
     global sqs_client, dynamodb_client, s3_client
+
+    if not AWS_ACCESS_KEY or not AWS_SECRET_KEY:
+        logger.error("AWS credentials not found in environment variables")
+        return False
 
     try:
         # Create session with credentials
@@ -61,12 +72,133 @@ def init_aws_clients():
         logger.error(f"Failed to initialize AWS clients: {e}")
         return False
 
-def setup_aws_resources():
-    """Create necessary AWS resources if they don't exist"""
-    if not AWS_ACCESS_KEY or not AWS_SECRET_KEY:
-        logger.error("AWS credentials not found in environment variables")
+def fix_dynamodb_table():
+    """Fix the DynamoDB table schema to work with Celery"""
+    try:
+        ensure_aws_clients()
+
+        # Check if table exists
+        try:
+            dynamodb_client.describe_table(TableName=DYNAMODB_TABLE_NAME)
+            logger.info(f"Table {DYNAMODB_TABLE_NAME} exists, checking schema...")
+
+            # We're simply going to recreate the table to ensure correct schema
+            dynamodb_client.delete_table(TableName=DYNAMODB_TABLE_NAME)
+
+            # Wait for the table to be deleted
+            waiter = dynamodb_client.get_waiter('table_not_exists')
+            waiter.wait(TableName=DYNAMODB_TABLE_NAME)
+            logger.info(f"Table {DYNAMODB_TABLE_NAME} deleted successfully")
+
+        except ClientError as e:
+            if e.response['Error']['Code'] != 'ResourceNotFoundException':
+                logger.error(f"Error checking table: {e}")
+                return False
+
+        # Create the table with the correct schema for Celery
+        dynamodb_client.create_table(
+            TableName=DYNAMODB_TABLE_NAME,
+            KeySchema=[
+                {'AttributeName': 'id', 'KeyType': 'HASH'},  # Use 'id' instead of 'task_id'
+            ],
+            AttributeDefinitions=[
+                {'AttributeName': 'id', 'AttributeType': 'S'},
+            ],
+            ProvisionedThroughput={
+                'ReadCapacityUnits': 5,
+                'WriteCapacityUnits': 5
+            }
+        )
+
+        # Wait for the table to be created
+        waiter = dynamodb_client.get_waiter('table_exists')
+        waiter.wait(TableName=DYNAMODB_TABLE_NAME)
+
+        # Enable TTL on the new table
+        dynamodb_client.update_time_to_live(
+            TableName=DYNAMODB_TABLE_NAME,
+            TimeToLiveSpecification={
+                'Enabled': True,
+                'AttributeName': 'expires'  # Use 'expires' instead of 'expires_at'
+            }
+        )
+
+        logger.info(f"Table {DYNAMODB_TABLE_NAME} created successfully with correct schema")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error fixing DynamoDB table: {e}")
         return False
 
+def test_opensearch_connection():
+    """Test and determine the best OpenSearch authentication method"""
+    try:
+        # Load OpenSearch details from environment
+        from distributed_config import OPENSEARCH_ENDPOINT, OPENSEARCH_USER, OPENSEARCH_PASS
+
+        if not OPENSEARCH_ENDPOINT:
+            logger.warning("OpenSearch endpoint not defined in environment")
+            return False, None
+
+        # Try AWS4Auth first (best for AWS OpenSearch)
+        auth = AWS4Auth(
+            AWS_ACCESS_KEY,
+            AWS_SECRET_KEY,
+            AWS_REGION,
+            'es'  # service name for OpenSearch
+        )
+
+        # Test connection with AWS4Auth
+        response = requests.get(
+            f"{OPENSEARCH_ENDPOINT}/_cluster/health",
+            auth=auth,
+            headers={"Content-Type": "application/json"},
+            timeout=10,
+            verify=True
+        )
+
+        if response.status_code == 200:
+            logger.info("AWS4Auth connection to OpenSearch successful!")
+            logger.info(f"Cluster health: {response.json()}")
+
+            # Save auth method for future use
+            with open("opensearch_auth_method.txt", "w") as f:
+                f.write("aws4auth")
+
+            return True, "aws4auth"
+        else:
+            logger.warning(f"AWS4Auth failed with status code {response.status_code}")
+
+        # Try basic auth
+        response = requests.get(
+            f"{OPENSEARCH_ENDPOINT}/_cluster/health",
+            auth=(OPENSEARCH_USER, OPENSEARCH_PASS),
+            headers={"Content-Type": "application/json"},
+            timeout=10,
+            verify=True
+        )
+
+        if response.status_code == 200:
+            logger.info("Basic auth connection to OpenSearch successful!")
+            logger.info(f"Cluster health: {response.json()}")
+
+            # Save auth method for future use
+            with open("opensearch_auth_method.txt", "w") as f:
+                f.write("basic")
+
+            return True, "basic"
+        else:
+            logger.error(f"Basic auth failed with status code {response.status_code}")
+
+        logger.error("All authentication methods failed for OpenSearch")
+        return False, None
+
+    except Exception as e:
+        logger.error(f"Error testing OpenSearch connection: {e}")
+        return False, None
+
+def setup_aws_resources():
+    """Create necessary AWS resources if they don't exist"""
     if not init_aws_clients():
         return False
 
@@ -98,54 +230,11 @@ def setup_aws_resources():
         logger.error(f"Error setting up SQS queues: {e}")
         success = False
 
-    # Create DynamoDB table for results
-    # Create DynamoDB table for results
-    try:
-        try:
-            dynamodb_client.describe_table(TableName=DYNAMODB_TABLE_NAME)
-            logger.info(f"DynamoDB table already exists: {DYNAMODB_TABLE_NAME}")
-        except ClientError as e:
-            if e.response['Error']['Code'] == 'ResourceNotFoundException':
-                # Table doesn't exist, create it
-                dynamodb_client.create_table(
-                    TableName=DYNAMODB_TABLE_NAME,
-                    KeySchema=[
-                        {'AttributeName': 'task_id', 'KeyType': 'HASH'}
-                    ],
-                    AttributeDefinitions=[
-                        {'AttributeName': 'task_id', 'AttributeType': 'S'}
-                    ],
-                    ProvisionedThroughput={
-                        'ReadCapacityUnits': 5,
-                        'WriteCapacityUnits': 5
-                    }
-                )
-                logger.info(f"DynamoDB table created: {DYNAMODB_TABLE_NAME}")
-
-                # Wait for table to become available
-                logger.info("Waiting for table to become active...")
-                waiter = dynamodb_client.get_waiter('table_exists')
-                waiter.wait(TableName=DYNAMODB_TABLE_NAME)
-
-                # Now enable TTL as a separate operation
-                try:
-                    dynamodb_client.update_time_to_live(
-                        TableName=DYNAMODB_TABLE_NAME,
-                        TimeToLiveSpecification={
-                            'Enabled': True,
-                            'AttributeName': 'expires_at'
-                        }
-                    )
-                    logger.info(f"TTL enabled for table: {DYNAMODB_TABLE_NAME}")
-                except ClientError as ttl_error:
-                    logger.warning(f"Could not enable TTL: {ttl_error}")
-            else:
-                raise
-    except ClientError as e:
-        logger.error(f"Error setting up DynamoDB table: {e}")
+    # Setup DynamoDB table with the fixed schema
+    if not fix_dynamodb_table():
         success = False
 
-    # Create S3 bucket
+    # Create S3 bucket and directory structure
     try:
         try:
             s3_client.head_bucket(Bucket=S3_BUCKET_NAME)
@@ -163,18 +252,28 @@ def setup_aws_resources():
                         )
                     logger.info(f"S3 bucket created: {S3_BUCKET_NAME}")
                 except ClientError as create_error:
-                    logger.warning(f"Could not create S3 bucket: {create_error}")
-                    logger.warning("Continuing without S3 storage - will use filesystem instead")
-                    # Don't mark success as False, just continue without S3
+                    logger.error(f"Could not create S3 bucket: {create_error}")
+                    logger.error("S3 storage is required for this application")
+                    success = False
             else:
                 raise
+
+        # Create S3 directory structure
+        if success:
+            create_s3_directories()
+
     except ClientError as e:
-        logger.warning(f"Error setting up S3 bucket: {e}")
-        logger.warning("Continuing without S3 storage - will use filesystem instead")
-        # Don't fail setup completely just because S3 is unavailable
+        logger.error(f"Error setting up S3 bucket: {e}")
+        success = False
+
+    # Test OpenSearch connection
+    try:
+        test_opensearch_connection()
+    except Exception as e:
+        logger.warning(f"OpenSearch connection test failed: {e}")
+        logger.warning("Search functionality may be limited")
 
     return success
-
 
 def ensure_aws_clients():
     """Ensure AWS clients are initialized before using them"""
@@ -199,3 +298,77 @@ def get_crawler_queue_url():
 
 def get_indexer_queue_url():
     return get_queue_url(SQS_INDEXER_QUEUE_NAME)
+
+# Create S3 directory structure
+def create_s3_directories():
+    """Create S3 directory structure for input, output, and config"""
+    ensure_aws_clients()
+    try:
+        # Create input directory
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=S3_INPUT_PREFIX,
+            Body=''
+        )
+
+        # Create output directory
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=S3_OUTPUT_PREFIX,
+            Body=''
+        )
+
+        # Create config directory
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=S3_CONFIG_PREFIX,
+            Body=''
+        )
+
+        logger.info(f"Created S3 directory structure in {S3_BUCKET_NAME}")
+        return True
+    except Exception as e:
+        logger.error(f"Error creating S3 directories: {e}")
+        return False
+
+# Helper function to store configuration in S3
+def store_config_in_s3(config):
+    """Store crawler configuration in S3"""
+    ensure_aws_clients()
+    try:
+        key = f"{S3_CONFIG_PREFIX}crawler_config.json"
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=key,
+            Body=json.dumps(config, indent=2).encode(),
+            ContentType='application/json'
+        )
+        logger.info(f"Configuration saved to S3: s3://{S3_BUCKET_NAME}/{key}")
+        return True
+    except Exception as e:
+        logger.error(f"Error saving configuration to S3: {e}")
+        return False
+
+# Helper function to retrieve configuration from S3
+def get_config_from_s3():
+    """Retrieve crawler configuration from S3"""
+    ensure_aws_clients()
+    try:
+        key = f"{S3_CONFIG_PREFIX}crawler_config.json"
+        response = s3_client.get_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=key
+        )
+        config = json.loads(response['Body'].read().decode())
+        logger.info(f"Configuration retrieved from S3: s3://{S3_BUCKET_NAME}/{key}")
+        return config
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchKey':
+            logger.warning(f"No configuration found in S3, using default")
+            return None
+        else:
+            logger.error(f"Error retrieving configuration from S3: {e}")
+            return None
+    except Exception as e:
+        logger.error(f"Error retrieving configuration from S3: {e}")
+        return None

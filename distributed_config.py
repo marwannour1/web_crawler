@@ -3,7 +3,7 @@
 
 """
 Configuration for distributed web crawler deployment on AWS
-Using AWS services (SQS, DynamoDB, S3) instead of Redis
+Using AWS services (SQS, DynamoDB, S3) exclusively
 """
 import os
 import logging
@@ -12,10 +12,10 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Node IP addresses - still useful for health checks
-MASTER_IP = "172.31.21.220"
-CRAWLER_IP = "172.31.23.169"
-INDEXER_IP = "172.31.20.112"
+# Node IP addresses - for health checks
+MASTER_IP = os.environ.get("MASTER_IP", "172.31.21.220")
+CRAWLER_IP = os.environ.get("CRAWLER_IP", "172.31.23.169")
+INDEXER_IP = os.environ.get("INDEXER_IP", "172.31.20.112")
 
 # AWS OpenSearch Service configuration
 OPENSEARCH_ENDPOINT = os.environ.get("OPENSEARCH_ENDPOINT", "")
@@ -31,7 +31,8 @@ AWS_REGION = os.environ.get("AWS_REGION", "eu-north-1")
 if OPENSEARCH_ENDPOINT:
     ELASTICSEARCH_URL = OPENSEARCH_ENDPOINT
 else:
-    ELASTICSEARCH_URL = f"http://{INDEXER_IP}:9200"
+    logger.warning("OpenSearch endpoint not provided. Search functionality will be limited.")
+    ELASTICSEARCH_URL = None
 
 # Node type - set appropriately on each instance
 NODE_TYPE = os.environ.get("NODE_TYPE", "master")  # Change to "crawler" or "indexer" on respective nodes
@@ -46,11 +47,3 @@ from aws_config import (
 # Celery configuration with SQS and DynamoDB
 CELERY_BROKER = f"sqs://{AWS_ACCESS_KEY_ID}:{AWS_SECRET_ACCESS_KEY}@{AWS_REGION}"
 CELERY_BACKEND = f"dynamodb://{AWS_ACCESS_KEY_ID}:{AWS_SECRET_ACCESS_KEY}@{AWS_REGION}/{DYNAMODB_TABLE_NAME}"
-
-# Import and setup AWS resources
-try:
-    from aws_config import setup_aws_resources
-    if not setup_aws_resources():
-        logger.warning("Failed to set up some AWS resources. Some functionality may be limited.")
-except ImportError:
-    logger.error("Failed to import aws_config. AWS services setup failed.")

@@ -72,7 +72,7 @@ class DynamoDBBackend(KeyValueStoreBackend):
             self.client.create_table(
                 TableName=self.table_name,
                 KeySchema=[
-                    {'AttributeName': 'id', 'KeyType': 'HASH'}
+                    {'AttributeName': 'id', 'KeyType': 'HASH'}  # Use 'id' instead of 'task_id'
                 ],
                 AttributeDefinitions=[
                     {'AttributeName': 'id', 'AttributeType': 'S'}
@@ -80,16 +80,21 @@ class DynamoDBBackend(KeyValueStoreBackend):
                 ProvisionedThroughput={
                     'ReadCapacityUnits': 5,
                     'WriteCapacityUnits': 5
-                },
-                TimeToLiveSpecification={
-                    'Enabled': True,
-                    'AttributeName': 'expires_at'
                 }
             )
 
             # Wait for table creation
             waiter = self.client.get_waiter('table_exists')
             waiter.wait(TableName=self.table_name)
+
+            # Enable TTL
+            self.client.update_time_to_live(
+                TableName=self.table_name,
+                TimeToLiveSpecification={
+                    'Enabled': True,
+                    'AttributeName': 'expires'  # Use 'expires' instead of 'expires_at'
+                }
+            )
 
             return True
         except Exception as e:
@@ -110,12 +115,12 @@ class DynamoDBBackend(KeyValueStoreBackend):
             if result is not None:
                 result = self.encode(result)
 
-            # Store in DynamoDB
+            # Store in DynamoDB - use 'id' instead of 'task_id'
             item = {
                 'id': {'S': key},
                 'state': {'S': state},
                 'result': {'S': result} if result else {'NULL': True},
-                'expires_at': {'N': str(expires_at)}
+                'expires': {'N': str(expires_at)}  # Use 'expires' instead of 'expires_at'
             }
 
             if traceback:
@@ -136,7 +141,7 @@ class DynamoDBBackend(KeyValueStoreBackend):
         try:
             response = self.client.get_item(
                 TableName=self.table_name,
-                Key={'id': {'S': key}}
+                Key={'id': {'S': key}}  # Use 'id' instead of 'task_id'
             )
 
             if 'Item' not in response:
@@ -162,7 +167,7 @@ class DynamoDBBackend(KeyValueStoreBackend):
         try:
             self.client.delete_item(
                 TableName=self.table_name,
-                Key={'id': {'S': key}}
+                Key={'id': {'S': key}}  # Use 'id' instead of 'task_id'
             )
             return True
         except Exception as e:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# filepath: g:\ain_shams\courses\Distributed Computing CSE354\projects\web_crawler\crawler_cli.py
+# filepath: crawler_cli.py
 
 import argparse
 import json
@@ -14,12 +14,12 @@ from celery_app import app as celery_app
 from search import search_content
 
 def load_config():
-    """Load configuration from config file"""
+    """Load configuration from config file and S3"""
     config_manager = CrawlerConfig()
     return config_manager.get_config()
 
 def save_config(config):
-    """Save configuration to config file"""
+    """Save configuration to config file and S3"""
     config_manager = CrawlerConfig()
     config_manager.config = config
     config_manager.save_config()
@@ -42,7 +42,7 @@ def print_config(config):
     print("-" * 50)
 
 def monitor_tasks(task_ids, max_runtime=300, status_interval=5):
-    """Monitor task progress with timeout"""
+    """Monitor task progress without using Celery inspector (SQS compatible)"""
     print(f"\nMonitoring {len(task_ids)} crawler tasks...")
 
     try:
@@ -53,21 +53,19 @@ def monitor_tasks(task_ids, max_runtime=300, status_interval=5):
         start_time = time.time()
 
         while True:
-            # Get active task count from Celery inspector
-            inspector = celery_app.control.inspect()
-            active_tasks = inspector.active()
-            reserved_tasks = inspector.reserved()
+            # Only check the state of the tasks we're explicitly tracking
+            states = [task.state for task in initial_tasks]
 
-            # Count active tasks
-            active_count = 0
+            pending_count = states.count('PENDING')
+            running_count = states.count('STARTED')
+            success_count = states.count('SUCCESS')
+            failed_count = states.count('FAILURE')
 
-            if active_tasks:
-                active_count += sum(len(tasks) for tasks in active_tasks.values())
+            total_active = pending_count + running_count
 
-            if reserved_tasks:
-                active_count += sum(len(tasks) for tasks in reserved_tasks.values())
-
-            print(f"\r[{time.strftime('%H:%M:%S')}] Active tasks: {active_count}   ", end="", flush=True)
+            print(f"\r[{time.strftime('%H:%M:%S')}] Tasks: {pending_count} pending, " +
+                  f"{running_count} running, {success_count} completed, {failed_count} failed",
+                  end="", flush=True)
 
             # Check if all initial tasks are complete
             all_initial_done = all(task.ready() for task in initial_tasks)
@@ -78,8 +76,14 @@ def monitor_tasks(task_ids, max_runtime=300, status_interval=5):
                 print("\nMaximum runtime exceeded. Stopping monitoring.")
                 break
 
-            if active_count == 0 and all_initial_done:
-                print("\nAll tasks completed. Crawler process finished!")
+            if all_initial_done and total_active == 0:
+                print("\nAll tracked tasks completed.")
+                break
+
+            # Check if we're getting results for seed tasks
+            if elapsed_time > 60 and all(task.state == 'PENDING' for task in initial_tasks):
+                print("\nWarning: Initial tasks still pending after 60 seconds.")
+                print("Workers may not be processing tasks. Check crawler and indexer nodes.")
                 break
 
             time.sleep(status_interval)
@@ -124,6 +128,9 @@ def start_crawler(args):
     print(f"Using {config['num_crawlers']} crawler workers and {config['num_indexers']} indexer workers")
 
     try:
+        # Check node health
+        check_node_health()
+
         # Submit initial tasks
         task_ids = start_crawl()
         print(f"Submitted {len(task_ids)} initial crawling tasks")
@@ -135,42 +142,140 @@ def start_crawler(args):
     except Exception as e:
         print(f"Error starting crawler: {e}")
 
-def show_status(args):
-    """Show the status of current crawler tasks"""
+def check_node_health():
+    """Check if crawler and indexer nodes are healthy"""
     try:
-        # Get inspector
-        inspector = celery_app.control.inspect()
+        from distributed_config import CRAWLER_IP, INDEXER_IP
+        import requests
 
-        # Get various task statuses
-        active = inspector.active()
-        scheduled = inspector.scheduled()
-        reserved = inspector.reserved()
+        # Check crawler node
+        try:
+            crawler_resp = requests.get(f"http://{CRAWLER_IP}:8080/health", timeout=5)
+            crawler_status = "OK" if crawler_resp.status_code == 200 else "ERROR"
+        except Exception:
+            crawler_status = "DOWN"
 
+        # Check indexer node
+        try:
+            indexer_resp = requests.get(f"http://{INDEXER_IP}:8080/health", timeout=5)
+            indexer_status = "OK" if indexer_resp.status_code == 200 else "ERROR"
+        except Exception:
+            indexer_status = "DOWN"
+
+        print(f"Node Health Check - Crawler: {crawler_status}, Indexer: {indexer_status}")
+
+        if crawler_status != "OK":
+            print("Warning: Crawler node appears to be down or unhealthy.")
+        if indexer_status != "OK":
+            print("Warning: Indexer node appears to be down or unhealthy.")
+    except Exception as e:
+        print(f"Error checking node health: {e}")
+
+def show_status(args):
+    """Show the status of current crawler tasks using AWS-friendly approaches"""
+    try:
         print("\nCrawler Status")
         print("-" * 50)
+        print("Note: Detailed task inspection is not available with AWS SQS.")
 
-        # Active tasks
-        active_count = 0
-        if active:
-            for worker, tasks in active.items():
-                active_count += len(tasks)
-                print(f"\nWorker {worker}: {len(tasks)} active tasks")
-                for i, task in enumerate(tasks[:5], 1):  # Show first 5 tasks
-                    print(f"  {i}. {task['name']} - {task['id'][:8]}...")
-                if len(tasks) > 5:
-                    print(f"  ... and {len(tasks) - 5} more")
+        # Show S3 storage status
+        from aws_config import S3_BUCKET_NAME, S3_OUTPUT_PREFIX, ensure_aws_clients
+        ensure_aws_clients()
 
-        # Reserved tasks
-        reserved_count = 0
-        if reserved:
-            reserved_count = sum(len(tasks) for tasks in reserved.values())
+        from aws_config import s3_client
 
-        # Scheduled tasks
-        scheduled_count = 0
-        if scheduled:
-            scheduled_count = sum(len(tasks) for tasks in scheduled.values())
+        try:
+            # Count processed URLs in S3
+            response = s3_client.list_objects_v2(
+                Bucket=S3_BUCKET_NAME,
+                Prefix=S3_OUTPUT_PREFIX
+            )
 
-        print(f"\nSummary: {active_count} active, {reserved_count} reserved, {scheduled_count} scheduled tasks")
+            processed_count = 0
+            if 'Contents' in response:
+                processed_count = sum(1 for item in response['Contents'] if item['Key'].endswith('.json'))
+
+            print(f"\nProcessed URLs (in S3): {processed_count}")
+            print(f"S3 Bucket: {S3_BUCKET_NAME}")
+
+            # Check crawler and indexer node health through API endpoints
+            from distributed_config import CRAWLER_IP, INDEXER_IP
+            import requests
+
+            try:
+                crawler_status = "UNKNOWN"
+                try:
+                    r = requests.get(f"http://{CRAWLER_IP}:8080/health", timeout=2)
+                    crawler_status = "RUNNING" if r.status_code == 200 else "ERROR"
+                except:
+                    crawler_status = "DOWN"
+
+                indexer_status = "UNKNOWN"
+                try:
+                    r = requests.get(f"http://{INDEXER_IP}:8080/health", timeout=2)
+                    indexer_status = "RUNNING" if r.status_code == 200 else "ERROR"
+                except:
+                    indexer_status = "DOWN"
+
+                print(f"\nCrawler node: {crawler_status}")
+                print(f"Indexer node: {indexer_status}")
+            except:
+                print("Could not check node health")
+
+            # Try to check OpenSearch status
+            try:
+                from distributed_config import OPENSEARCH_ENDPOINT
+                from requests_aws4auth import AWS4Auth
+                from distributed_config import AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, OPENSEARCH_USER, OPENSEARCH_PASS
+                import requests
+
+                opensearch_status = "DOWN"
+
+                # Determine auth method
+                auth_method = "aws4auth"  # Default
+                try:
+                    with open("opensearch_auth_method.txt", "r") as f:
+                        auth_method = f.read().strip()
+                except:
+                    pass
+
+                if auth_method == "aws4auth":
+                    auth = AWS4Auth(
+                        AWS_ACCESS_KEY_ID,
+                        AWS_SECRET_ACCESS_KEY,
+                        AWS_REGION,
+                        'es'
+                    )
+
+                    try:
+                        response = requests.get(
+                            f"{OPENSEARCH_ENDPOINT}/_cluster/health",
+                            auth=auth,
+                            timeout=3
+                        )
+                        opensearch_status = "OK" if response.status_code == 200 else "ERROR"
+                    except:
+                        opensearch_status = "DOWN"
+                else:
+                    # Basic auth
+                    try:
+                        response = requests.get(
+                            f"{OPENSEARCH_ENDPOINT}/_cluster/health",
+                            auth=(OPENSEARCH_USER, OPENSEARCH_PASS),
+                            timeout=3
+                        )
+                        opensearch_status = "OK" if response.status_code == 200 else "ERROR"
+                    except:
+                        opensearch_status = "DOWN"
+
+                print(f"OpenSearch status: {opensearch_status}")
+
+            except Exception as es_err:
+                print(f"Could not check OpenSearch status: {es_err}")
+
+        except Exception as e:
+            print(f"Error getting S3 details: {e}")
+
         print("-" * 50)
 
     except Exception as e:
@@ -196,6 +301,8 @@ def search_crawler(args):
         for i, result in enumerate(results, 1):
             print(f"{i}. {result['title']} (Score: {result['score']:.2f})")
             print(f"   URL: {result['url']}")
+            if 's3_key' in result and result['s3_key']:
+                print(f"   S3: {result['s3_key']}")
             print(f"   Description: {result['description'][:100]}..." if len(result['description']) > 100 else result['description'])
 
             if "highlights" in result and "text_content" in result["highlights"]:
@@ -259,6 +366,80 @@ def configure(args):
         # Display current config only
         pass
 
+def list_s3_content(args):
+    """List content in S3 bucket"""
+    from aws_config import S3_BUCKET_NAME, S3_OUTPUT_PREFIX, ensure_aws_clients
+
+    ensure_aws_clients()
+    from aws_config import s3_client
+
+    print(f"\nContent in S3 bucket: {S3_BUCKET_NAME}")
+    print("-" * 50)
+
+    try:
+        # List objects in the bucket with the given prefix
+        response = s3_client.list_objects_v2(
+            Bucket=S3_BUCKET_NAME,
+            Prefix=S3_OUTPUT_PREFIX
+        )
+
+        if 'Contents' not in response or not response['Contents']:
+            print("No content found in S3 bucket.")
+            return
+
+        # Count and display statistics
+        json_files = [item for item in response['Contents'] if item['Key'].endswith('.json')]
+        txt_files = [item for item in response['Contents'] if item['Key'].endswith('.txt')]
+
+        print(f"Found {len(json_files)} JSON files and {len(txt_files)} text files")
+        print(f"Total storage used: {sum(item['Size'] for item in response['Contents']) / (1024*1024):.2f} MB")
+
+        # Display the most recent files
+        if json_files:
+            sorted_files = sorted(json_files, key=lambda x: x['LastModified'], reverse=True)
+            print("\nMost recent crawled pages:")
+            for i, item in enumerate(sorted_files[:10], 1):
+                key = item['Key']
+                size_kb = item['Size'] / 1024
+                last_modified = item['LastModified'].strftime('%Y-%m-%d %H:%M:%S')
+                print(f"{i}. {key} ({size_kb:.1f} KB, {last_modified})")
+
+            if len(sorted_files) > 10:
+                print(f"... and {len(sorted_files) - 10} more files")
+    except Exception as e:
+        print(f"Error listing S3 content: {e}")
+
+def fix_resources(args):
+    """Fix or initialize AWS resources"""
+    print("Fixing AWS resources...")
+
+    try:
+        # Initialize AWS resources
+        from aws_config import setup_aws_resources, fix_dynamodb_table
+
+        # Set up resources
+        if setup_aws_resources():
+            print("AWS resources set up successfully.")
+        else:
+            print("Warning: Some AWS resources could not be set up.")
+
+        # Fix DynamoDB table
+        if fix_dynamodb_table():
+            print("DynamoDB table fixed successfully.")
+        else:
+            print("Error: Could not fix DynamoDB table.")
+
+        # Test OpenSearch connection
+        from aws_config import test_opensearch_connection
+        success, auth_method = test_opensearch_connection()
+        if success:
+            print(f"OpenSearch connection tested successfully using {auth_method} authentication.")
+        else:
+            print("Warning: Could not connect to OpenSearch.")
+
+    except Exception as e:
+        print(f"Error fixing AWS resources: {e}")
+
 def main():
     """Main entry point for the CLI"""
     parser = argparse.ArgumentParser(description="Distributed Web Crawler CLI")
@@ -282,9 +463,15 @@ def main():
     search_parser = subparsers.add_parser("search", help="Search indexed content")
     search_parser.add_argument("query", help="Search query")
 
+    # List command for S3
+    list_parser = subparsers.add_parser("list", help="List crawled content in S3")
+
     # Configure command
     config_parser = subparsers.add_parser("config", help="Configure crawler settings")
     config_parser.add_argument("--interactive", "-i", action="store_true", help="Interactive configuration")
+
+    # Fix command for AWS resources
+    fix_parser = subparsers.add_parser("fix", help="Fix/initialize AWS resources")
 
     args = parser.parse_args()
 
@@ -296,6 +483,10 @@ def main():
         search_crawler(args)
     elif args.command == "config":
         configure(args)
+    elif args.command == "list":
+        list_s3_content(args)
+    elif args.command == "fix":
+        fix_resources(args)
     else:
         parser.print_help()
 

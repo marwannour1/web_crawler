@@ -2,7 +2,8 @@
 # filepath: run_master.py
 
 """
-Master node script: initializes AWS services and coordinates the crawl process
+Master node script: initializes AWS services and coordinates the crawl process.
+The master node is responsible for managing the overall crawler process.
 """
 import os
 import sys
@@ -12,6 +13,7 @@ import threading
 import logging
 from crawler_config import CrawlerConfig
 from distributed_config import CRAWLER_IP, INDEXER_IP, MASTER_IP
+from aws_config import setup_aws_resources, fix_dynamodb_table
 
 # Set up logging
 logging.basicConfig(
@@ -23,23 +25,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-
-def setup_aws_resources():
-    """Initialize AWS resources (SQS queues, DynamoDB table, S3 bucket)"""
-    try:
-        # Import here to avoid circular imports
-        from aws_config import setup_aws_resources as aws_setup
-
-        logger.info("Initializing AWS resources...")
-        if aws_setup():
-            logger.info("AWS resources initialized successfully")
-            return True
-        else:
-            logger.error("Failed to initialize AWS resources")
-            return False
-    except Exception as e:
-        logger.error(f"Error initializing AWS resources: {e}")
-        return False
 
 def health_check_worker():
     """Run periodic health checks on worker nodes"""
@@ -86,6 +71,61 @@ def check_environment_variables():
 
     return True
 
+def monitor_tasks_without_inspector(task_ids, max_runtime=300, status_interval=5):
+    """Monitor task progress without using Celery inspector (SQS compatible)"""
+    print(f"\nMonitoring {len(task_ids)} crawler tasks...")
+
+    try:
+        from celery.result import AsyncResult
+        from celery_app import app as celery_app
+
+        # Get initial tasks
+        initial_tasks = [AsyncResult(task_id, app=celery_app) for task_id in task_ids]
+
+        # Monitor task progress with overall timeout
+        start_time = time.time()
+
+        while True:
+            # Only check the state of the tasks we're explicitly tracking
+            states = [task.state for task in initial_tasks]
+
+            pending_count = states.count('PENDING')
+            running_count = states.count('STARTED')
+            success_count = states.count('SUCCESS')
+            failed_count = states.count('FAILURE')
+
+            total_active = pending_count + running_count
+
+            print(f"\r[{time.strftime('%H:%M:%S')}] Tasks: {pending_count} pending, " +
+                  f"{running_count} running, {success_count} completed, {failed_count} failed",
+                  end="", flush=True)
+
+            # Check if all initial tasks are complete
+            all_initial_done = all(task.ready() for task in initial_tasks)
+
+            # Check timeouts
+            elapsed_time = time.time() - start_time
+            if elapsed_time > max_runtime:
+                print("\nMaximum runtime exceeded. Stopping monitoring.")
+                break
+
+            if all_initial_done and total_active == 0:
+                print("\nAll tracked tasks completed.")
+                break
+
+            # Check if we're getting results for seed tasks
+            if elapsed_time > 60 and all(task.state == 'PENDING' for task in initial_tasks):
+                print("\nWarning: Initial tasks still pending after 60 seconds.")
+                print("Workers may not be processing tasks. Check crawler and indexer nodes.")
+                break
+
+            time.sleep(status_interval)
+
+    except KeyboardInterrupt:
+        print("\nMonitoring stopped by user.")
+    except Exception as e:
+        print(f"\nError in monitoring: {e}")
+
 def main():
     """Main entry point for master node"""
     logger.info("Starting Web Crawler Master Node using AWS services")
@@ -95,8 +135,13 @@ def main():
         sys.exit(1)
 
     # Initialize AWS resources
+    logger.info("Initializing AWS resources...")
     if not setup_aws_resources():
-        logger.error("Failed to setup AWS resources. Continuing with limited functionality.")
+        logger.error("Failed to setup AWS resources. Exiting.")
+        sys.exit(1)
+
+    # Fix DynamoDB table if needed
+    fix_dynamodb_table()
 
     # Start health check thread
     health_thread = threading.Thread(target=health_check_worker)
