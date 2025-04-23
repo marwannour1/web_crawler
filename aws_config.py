@@ -151,21 +151,27 @@ def setup_aws_resources():
             s3_client.head_bucket(Bucket=S3_BUCKET_NAME)
             logger.info(f"S3 bucket already exists: {S3_BUCKET_NAME}")
         except ClientError as e:
-            if e.response['Error']['Code'] == '404':
-                # Bucket doesn't exist, create it
-                if AWS_REGION == 'us-east-1':
-                    s3_client.create_bucket(Bucket=S3_BUCKET_NAME)
-                else:
-                    s3_client.create_bucket(
-                        Bucket=S3_BUCKET_NAME,
-                        CreateBucketConfiguration={'LocationConstraint': AWS_REGION}
-                    )
-                logger.info(f"S3 bucket created: {S3_BUCKET_NAME}")
+            if e.response['Error']['Code'] == '404' or e.response['Error']['Code'] == '403':
+                # Bucket doesn't exist or we don't have permission to check it
+                try:
+                    if AWS_REGION == 'us-east-1':
+                        s3_client.create_bucket(Bucket=S3_BUCKET_NAME)
+                    else:
+                        s3_client.create_bucket(
+                            Bucket=S3_BUCKET_NAME,
+                            CreateBucketConfiguration={'LocationConstraint': AWS_REGION}
+                        )
+                    logger.info(f"S3 bucket created: {S3_BUCKET_NAME}")
+                except ClientError as create_error:
+                    logger.warning(f"Could not create S3 bucket: {create_error}")
+                    logger.warning("Continuing without S3 storage - will use filesystem instead")
+                    # Don't mark success as False, just continue without S3
             else:
                 raise
     except ClientError as e:
-        logger.error(f"Error setting up S3 bucket: {e}")
-        success = False
+        logger.warning(f"Error setting up S3 bucket: {e}")
+        logger.warning("Continuing without S3 storage - will use filesystem instead")
+        # Don't fail setup completely just because S3 is unavailable
 
     return success
 
