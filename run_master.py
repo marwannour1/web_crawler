@@ -2,14 +2,13 @@
 # filepath: run_master.py
 
 """
-Master node script: starts Redis and coordinates the crawl process
+Master node script: initializes AWS services and coordinates the crawl process
 """
 import os
 import sys
 import time
 import requests
 import threading
-import subprocess
 import logging
 from crawler_config import CrawlerConfig
 from distributed_config import CRAWLER_IP, INDEXER_IP, MASTER_IP
@@ -25,20 +24,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def check_redis():
-    """Ensure Redis is running"""
+def setup_aws_resources():
+    """Initialize AWS resources (SQS queues, DynamoDB table, S3 bucket)"""
     try:
-        result = subprocess.run(['redis-cli', 'ping'],
-                               stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE)
-        if result.returncode != 0 or b'PONG' not in result.stdout:
-            logger.error("Redis is not running. Starting Redis...")
-            subprocess.Popen(['redis-server', '--daemonize', 'yes'])
-            time.sleep(2)  # Give Redis time to start
-            return check_redis()  # Verify it started
-        return True
+        # Import here to avoid circular imports
+        from aws_config import setup_aws_resources as aws_setup
+
+        logger.info("Initializing AWS resources...")
+        if aws_setup():
+            logger.info("AWS resources initialized successfully")
+            return True
+        else:
+            logger.error("Failed to initialize AWS resources")
+            return False
     except Exception as e:
-        logger.error(f"Failed to check/start Redis: {e}")
+        logger.error(f"Error initializing AWS resources: {e}")
         return False
 
 def health_check_worker():
@@ -67,23 +67,53 @@ def health_check_worker():
         # Sleep for 30 seconds before next check
         time.sleep(30)
 
+def check_environment_variables():
+    """Check if required AWS environment variables are set"""
+    required_vars = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION"]
+    missing_vars = [var for var in required_vars if not os.environ.get(var)]
+
+    if missing_vars:
+        logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+        logger.error("Please set these environment variables before running the master node")
+        return False
+
+    # Check OpenSearch variables if endpoint is provided
+    if os.environ.get("OPENSEARCH_ENDPOINT"):
+        opensearch_vars = ["OPENSEARCH_USER", "OPENSEARCH_PASS"]
+        missing_opensearch = [var for var in opensearch_vars if not os.environ.get(var)]
+        if missing_opensearch:
+            logger.warning(f"OpenSearch endpoint set but missing credentials: {', '.join(missing_opensearch)}")
+
+    return True
+
 def main():
     """Main entry point for master node"""
-    logger.info("Starting Web Crawler Master Node")
+    logger.info("Starting Web Crawler Master Node using AWS services")
 
-    # Check if Redis is running
-    if not check_redis():
-        logger.error("Failed to ensure Redis is running. Exiting.")
+    # Check if required environment variables are set
+    if not check_environment_variables():
         sys.exit(1)
+
+    # Initialize AWS resources
+    if not setup_aws_resources():
+        logger.error("Failed to setup AWS resources. Continuing with limited functionality.")
 
     # Start health check thread
     health_thread = threading.Thread(target=health_check_worker)
     health_thread.daemon = True
     health_thread.start()
+    logger.info("Health check monitoring started")
 
     # Start CLI interface
-    from crawler_cli import main as cli_main
-    cli_main()
+    try:
+        from crawler_cli import main as cli_main
+        logger.info("Starting CLI interface")
+        cli_main()
+    except KeyboardInterrupt:
+        logger.info("Master node stopped by user")
+    except Exception as e:
+        logger.error(f"Error in CLI interface: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
