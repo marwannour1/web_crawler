@@ -2,7 +2,7 @@
 # filepath: run_crawler.py
 
 """
-Crawler node script: runs crawler workers and provides health status endpoint
+Crawler node script: runs crawler workers
 """
 import os
 import sys
@@ -13,7 +13,7 @@ import subprocess
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from crawler_config import CrawlerConfig
-from distributed_config import REDIS_URL, NODE_TYPE
+from distributed_config import NODE_TYPE  # Remove REDIS_URL, only import NODE_TYPE
 
 # Set up logging
 logging.basicConfig(
@@ -52,11 +52,11 @@ def start_health_server():
         logger.error(f"Failed to start health server: {e}")
 
 def start_crawler_workers():
-    """Start crawler workers connecting to the master's Redis"""
+    """Start crawler workers connecting to AWS SQS"""
     config = CrawlerConfig().get_config()
     num_workers = config.get('num_crawlers', 4)
 
-    logger.info(f"Starting {num_workers} crawler workers connected to {REDIS_URL}")
+    logger.info(f"Starting {num_workers} crawler workers connected to AWS SQS")
 
     env = os.environ.copy()
     env['PYTHONPATH'] = os.path.abspath(os.path.dirname(__file__))
@@ -88,9 +88,26 @@ def start_crawler_workers():
         worker_process.terminate()
         sys.exit(0)
 
+def setup_aws_resources():
+    """Initialize AWS resources"""
+    try:
+        from aws_config import setup_aws_resources as aws_setup
+        if aws_setup():
+            logger.info("AWS resources initialized successfully")
+            return True
+        else:
+            logger.warning("Failed to initialize some AWS resources")
+            return False
+    except ImportError as e:
+        logger.error(f"Could not import AWS config: {e}")
+        return False
+
 def main():
     """Main function for crawler node"""
-    logger.info("Starting Crawler Node")
+    logger.info("Starting Crawler Node with AWS services")
+
+    # Initialize AWS resources
+    setup_aws_resources()
 
     # Start health server in a background thread
     health_thread = threading.Thread(target=start_health_server)
