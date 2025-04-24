@@ -35,11 +35,8 @@ try:
         task_acks_late=True,
         task_track_started=True,
 
-        # Important: Use SimpleDB backend instead of custom DynamoDB backend
-        # This is fully supported by Celery without custom code
-        result_backend=None,  # We'll set this after task_ignore_result
-
-        # Skip result backend for simplicity - store results in S3 directly
+        # Skip result backend for simplicity
+        result_backend=None,
         task_ignore_result=True,
 
         # SQS broker configuration
@@ -68,13 +65,6 @@ try:
             'tasks.index': {'queue': 'indexer'},
         }
     )
-
-    # Optional: If you need task results, uncomment and use this RPC backend
-    # which is simpler than DynamoDB but still functional
-    # app.conf.result_backend = 'rpc://'
-
-    result_backend=None,
-    task_ignore_result=True,
 
     logger.info("Celery app initialized with SQS broker")
     logger.info(f"Using {SQS_CRAWLER_QUEUE_NAME} for crawler tasks")
