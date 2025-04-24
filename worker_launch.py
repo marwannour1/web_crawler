@@ -19,4 +19,5 @@ for task_name in app.tasks.keys():
 # Start the worker process
 if __name__ == '__main__':
     argv = sys.argv[1:]  # Skip the script name
+    argv = ['worker'] + argv
     app.worker_main(argv)
