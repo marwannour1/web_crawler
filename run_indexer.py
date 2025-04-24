@@ -171,7 +171,7 @@ def start_indexer_workers():
 
     # Indexer workers - only handle tasks in indexer queue
     worker_process = subprocess.Popen([
-        'python3', 'worker_launch.py'
+        'python3', 'worker_launch.py',
         '--loglevel=info',
         '--concurrency', str(num_workers),
         '-Q', 'indexer',  # Only process indexer tasks
