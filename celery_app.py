@@ -71,7 +71,7 @@ try:
 
     # Optional: If you need task results, uncomment and use this RPC backend
     # which is simpler than DynamoDB but still functional
-    app.conf.result_backend = 'rpc://'
+    # app.conf.result_backend = 'rpc://'
 
     logger.info("Celery app initialized with SQS broker")
     logger.info(f"Using {SQS_CRAWLER_QUEUE_NAME} for crawler tasks")
