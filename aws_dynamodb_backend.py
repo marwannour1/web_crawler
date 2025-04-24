@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 class DynamoDBBackend(KeyValueStoreBackend):
     """DynamoDB backend for Celery."""
 
-    def __init__(self, url=None, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, app=None, url=None, *args, **kwargs):
+        super().__init__(app=app, *args, **kwargs)
 
         # Parse the URL to get credentials and table name
         if url:
