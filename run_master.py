@@ -72,56 +72,61 @@ def check_environment_variables():
     return True
 
 def monitor_tasks_without_inspector(task_ids, max_runtime=300, status_interval=5):
-    """Monitor task progress without using AsyncResult (SQS compatible)"""
+    """Monitor task progress without using Celery inspector (SQS compatible)"""
     print(f"\nMonitoring {len(task_ids)} crawler tasks...")
 
     try:
-        from celery_app import app as celery_app
-
         # Monitor task progress with overall timeout
         start_time = time.time()
-        last_active_check = 0
 
-        # Track tasks without using AsyncResult
-        inspector = celery_app.control.inspect()
+        # With SQS, we can't easily monitor task status, so just wait for some time
+        # polling S3 instead to see new content
+        from aws_config import S3_BUCKET_NAME, S3_OUTPUT_PREFIX, ensure_aws_clients, s3_client
+        ensure_aws_clients()
+
+        # Get initial count
+        initial_count = count_s3_objects(S3_OUTPUT_PREFIX)
+        print(f"Initial content count in S3: {initial_count}")
 
         while True:
-            current_time = time.time()
-            elapsed_time = current_time - start_time
-
             # Check timeouts
+            elapsed_time = time.time() - start_time
             if elapsed_time > max_runtime:
                 print("\nMaximum runtime exceeded. Stopping monitoring.")
                 break
 
-            # Only query active tasks every 5 seconds to reduce API calls
-            if current_time - last_active_check >= status_interval:
-                last_active_check = current_time
+            # Sleep before checking again
+            time.sleep(status_interval)
 
-                # Get active and reserved tasks from all workers
-                active_tasks = inspector.active() or {}
-                reserved_tasks = inspector.reserved() or {}
+            # Check S3 for new content
+            current_count = count_s3_objects(S3_OUTPUT_PREFIX)
+            new_items = current_count - initial_count
 
-                # Count active and reserved tasks
-                active_count = sum(len(tasks) for tasks in active_tasks.values())
-                reserved_count = sum(len(tasks) for tasks in reserved_tasks.values())
+            print(f"\r[{time.strftime('%H:%M:%S')}] Processing... S3 objects: {current_count} " +
+                  f"(+{new_items} since start)", end="", flush=True)
 
-                # Display status
-                print(f"\r[{time.strftime('%H:%M:%S')}] Tasks: {reserved_count} pending, " +
-                      f"{active_count} active", end="", flush=True)
-
-                # If no activity for a while and some time has passed, assume completion
-                if active_count == 0 and reserved_count == 0 and elapsed_time > 60:
-                    print("\nNo active or reserved tasks. Assuming completion.")
-                    break
-
-            # Short sleep to prevent high CPU usage
-            time.sleep(1)
+            # If no new items for a while and some time has passed, assume completion
+            if elapsed_time > 60 and new_items == 0:
+                print("\nNo new content for a minute. Assuming completion.")
+                break
 
     except KeyboardInterrupt:
         print("\nMonitoring stopped by user.")
     except Exception as e:
         print(f"\nError in monitoring: {e}")
+
+def count_s3_objects(prefix):
+    """Count objects in S3 with a given prefix"""
+    from aws_config import S3_BUCKET_NAME, s3_client
+    try:
+        response = s3_client.list_objects_v2(
+            Bucket=S3_BUCKET_NAME,
+            Prefix=prefix
+        )
+        return response.get('KeyCount', 0)
+    except Exception as e:
+        print(f"Error counting S3 objects: {e}")
+        return 0
 
 def main():
     """Main entry point for master node"""
