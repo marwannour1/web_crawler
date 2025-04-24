@@ -18,6 +18,7 @@ from crawler_config import CrawlerConfig
 from distributed_config import NODE_TYPE
 from aws_config import setup_aws_resources
 from requests_aws4auth import AWS4Auth
+import tasks
 
 # Set up logging
 logging.basicConfig(
@@ -163,7 +164,7 @@ def start_indexer_workers():
 
     logger.info(f"Starting {num_workers} indexer workers connected to AWS SQS")
 
-    import tasks
+
 
     env = os.environ.copy()
     env['PYTHONPATH'] = os.path.abspath(os.path.dirname(__file__))
