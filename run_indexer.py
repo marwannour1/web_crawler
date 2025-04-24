@@ -163,6 +163,8 @@ def start_indexer_workers():
 
     logger.info(f"Starting {num_workers} indexer workers connected to AWS SQS")
 
+    import tasks
+
     env = os.environ.copy()
     env['PYTHONPATH'] = os.path.abspath(os.path.dirname(__file__))
 
