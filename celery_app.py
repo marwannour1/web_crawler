@@ -7,6 +7,7 @@ from celery import Celery
 from urllib.parse import quote
 import boto3
 from botocore.exceptions import NoCredentialsError, ClientError
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -22,8 +23,9 @@ try:
     # Create the Celery app with SQS broker
     app = Celery('webcrawler', broker=broker_url)
 
-    # Configure the app
+    # Configure the app with AWS settings
     app.conf.update(
+        # Basic celery settings
         task_serializer='json',
         accept_content=['json'],
         result_serializer='json',
@@ -32,6 +34,15 @@ try:
         worker_prefetch_multiplier=1,
         task_acks_late=True,
         task_track_started=True,
+
+        # Important: Use SimpleDB backend instead of custom DynamoDB backend
+        # This is fully supported by Celery without custom code
+        result_backend=None,  # We'll set this after task_ignore_result
+
+        # Skip result backend for simplicity - store results in S3 directly
+        task_ignore_result=True,
+
+        # SQS broker configuration
         broker_transport_options={
             'region': AWS_REGION,
             'polling_interval': 5,  # Seconds between polling SQS
@@ -50,28 +61,21 @@ try:
                 },
             }
         },
+
+        # Route tasks to appropriate queues
         task_routes={
             'tasks.crawl': {'queue': 'crawler'},
             'tasks.index': {'queue': 'indexer'},
         }
     )
 
-    # Direct backend configuration - bypass registration system
-    from aws_dynamodb_backend import DynamoDBBackend
+    # Optional: If you need task results, uncomment and use this RPC backend
+    # which is simpler than DynamoDB but still functional
+    app.conf.result_backend = 'rpc://'
 
-    # First create the backend
-    backend = DynamoDBBackend(
-        app=app,  # THIS WAS MISSING - It's required for KeyValueStoreBackend
-        aws_access_key=AWS_ACCESS_KEY,
-        aws_secret_key=AWS_SECRET_KEY,
-        region=AWS_REGION,
-        table_name=DYNAMODB_TABLE_NAME
-    )
-
-    # Then set it as the app's backend
-    app.backend = backend
-
-    logger.info("Celery app initialized with SQS broker and DynamoDB backend")
+    logger.info("Celery app initialized with SQS broker")
+    logger.info(f"Using {SQS_CRAWLER_QUEUE_NAME} for crawler tasks")
+    logger.info(f"Using {SQS_INDEXER_QUEUE_NAME} for indexer tasks")
 
 except ImportError as e:
     logger.error(f"Failed to import AWS configuration: {e}")
@@ -87,7 +91,7 @@ except NoCredentialsError:
     logger.warning("Using local Redis backend (AWS credentials missing)")
 
 except Exception as e:
-    logger.error(f"Failed to initialize DynamoDB backend: {e}")
+    logger.error(f"Failed to initialize AWS configuration: {e}")
     # Use memory backend instead of Redis as fallback
     app = Celery('webcrawler')
     app.conf.update(
