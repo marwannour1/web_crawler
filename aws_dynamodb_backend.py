@@ -181,7 +181,3 @@ class DynamoDBBackend(KeyValueStoreBackend):
     def decode(self, data):
         """Decode JSON string"""
         return json.loads(base64.b64decode(data.encode()).decode())
-
-# Register the backend
-from celery import backends
-backends.BACKEND_ALIASES['dynamodb'] = 'aws_dynamodb_backend.DynamoDBBackend'
