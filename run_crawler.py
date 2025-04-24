@@ -61,6 +61,9 @@ def start_crawler_workers():
 
     import tasks
 
+    from tasks import crawl, index
+    logger.info(f"Tasks registered: crawl={crawl.name}, index={index.name}")
+
     env = os.environ.copy()
     env['PYTHONPATH'] = os.path.abspath(os.path.dirname(__file__))
 
