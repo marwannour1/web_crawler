@@ -35,8 +35,8 @@ try:
         task_acks_late=True,
         task_track_started=True,
 
-        # Skip result backend for simplicity
-        result_backend=None,
+        # Set result backend for simplicity
+        result_backend='rpc://',
         task_ignore_result=True,
 
         # SQS broker configuration
