@@ -70,7 +70,7 @@ def start_crawler_workers():
 
     # Crawler workers - only handle tasks in crawler queue
     worker_process = subprocess.Popen([
-        'celery', '-A', 'celery_app', 'worker',
+        'python3', 'worker_launch.py',
         '--loglevel=info',
         '--concurrency', str(num_workers),
         '-Q', 'crawler',  # Only process crawler tasks
