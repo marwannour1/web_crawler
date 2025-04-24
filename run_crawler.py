@@ -58,6 +58,8 @@ def start_crawler_workers():
 
     logger.info(f"Starting {num_workers} crawler workers connected to AWS SQS")
 
+    import tasks
+
     env = os.environ.copy()
     env['PYTHONPATH'] = os.path.abspath(os.path.dirname(__file__))
 
