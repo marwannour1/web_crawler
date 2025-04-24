@@ -171,12 +171,15 @@ def start_indexer_workers():
 
     # Indexer workers - only handle tasks in indexer queue
     worker_process = subprocess.Popen([
-        'celery', '-A', 'celery_app', 'worker',
+        'python3', 'worker_launch.py'
         '--loglevel=info',
         '--concurrency', str(num_workers),
         '-Q', 'indexer',  # Only process indexer tasks
         '-n', f'indexer@{NODE_TYPE}',
-        '-P', 'solo'
+        '-P', 'solo',
+        '--without-gossip',
+        '--without-mingle',
+        '--without-heartbeat'
     ], env=env)
 
     logger.info("Indexer workers started successfully")
