@@ -42,56 +42,60 @@ def print_config(config):
     print("-" * 50)
 
 def monitor_tasks(task_ids, max_runtime=300, status_interval=5):
-    """Monitor task progress without using Celery inspector (SQS compatible)"""
+    """Monitor task progress by watching S3 (SQS compatible)"""
     print(f"\nMonitoring {len(task_ids)} crawler tasks...")
 
     try:
-        # Get initial tasks
-        initial_tasks = [AsyncResult(task_id, app=celery_app) for task_id in task_ids]
+        # Use S3 monitoring instead of AsyncResult/Inspector
+        from aws_config import S3_BUCKET_NAME, S3_OUTPUT_PREFIX, ensure_aws_clients
+        ensure_aws_clients()
+        from aws_config import s3_client
 
-        # Monitor task progress with overall timeout
+        # Get initial count of objects in S3
+        initial_count = count_s3_objects(S3_OUTPUT_PREFIX)
+        print(f"Initial content count in S3: {initial_count}")
+
+        # Monitor progress with overall timeout
         start_time = time.time()
 
         while True:
-            # Only check the state of the tasks we're explicitly tracking
-            states = [task.state for task in initial_tasks]
-
-            pending_count = states.count('PENDING')
-            running_count = states.count('STARTED')
-            success_count = states.count('SUCCESS')
-            failed_count = states.count('FAILURE')
-
-            total_active = pending_count + running_count
-
-            print(f"\r[{time.strftime('%H:%M:%S')}] Tasks: {pending_count} pending, " +
-                  f"{running_count} running, {success_count} completed, {failed_count} failed",
-                  end="", flush=True)
-
-            # Check if all initial tasks are complete
-            all_initial_done = all(task.ready() for task in initial_tasks)
-
             # Check timeouts
             elapsed_time = time.time() - start_time
             if elapsed_time > max_runtime:
                 print("\nMaximum runtime exceeded. Stopping monitoring.")
                 break
 
-            if all_initial_done and total_active == 0:
-                print("\nAll tracked tasks completed.")
-                break
+            # Check S3 for new content
+            current_count = count_s3_objects(S3_OUTPUT_PREFIX)
+            new_items = current_count - initial_count
 
-            # Check if we're getting results for seed tasks
-            if elapsed_time > 60 and all(task.state == 'PENDING' for task in initial_tasks):
-                print("\nWarning: Initial tasks still pending after 60 seconds.")
-                print("Workers may not be processing tasks. Check crawler and indexer nodes.")
+            print(f"\r[{time.strftime('%H:%M:%S')}] Processing... S3 objects: {current_count} " +
+                  f"(+{new_items} since start)", end="", flush=True)
+
+            # If no new items for a while and some time has passed, assume completion
+            if elapsed_time > 60 and new_items == 0:
+                print("\nNo new content for a minute. Assuming completion.")
                 break
 
             time.sleep(status_interval)
-
     except KeyboardInterrupt:
         print("\nMonitoring stopped by user.")
     except Exception as e:
         print(f"\nError in monitoring: {e}")
+
+# Add the S3 counting function as well
+def count_s3_objects(prefix):
+    """Count objects in S3 with a given prefix"""
+    from aws_config import S3_BUCKET_NAME, s3_client
+    try:
+        response = s3_client.list_objects_v2(
+            Bucket=S3_BUCKET_NAME,
+            Prefix=prefix
+        )
+        return response.get('KeyCount', 0)
+    except Exception as e:
+        print(f"Error counting S3 objects: {e}")
+        return 0
 
 def start_crawler(args):
     """Start the crawler with the given configuration"""
