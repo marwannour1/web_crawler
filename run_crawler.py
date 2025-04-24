@@ -14,6 +14,7 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from crawler_config import CrawlerConfig
 from distributed_config import NODE_TYPE
+import tasks
 
 # Set up logging
 logging.basicConfig(
@@ -58,7 +59,7 @@ def start_crawler_workers():
 
     logger.info(f"Starting {num_workers} crawler workers connected to AWS SQS")
 
-    import tasks
+
 
     env = os.environ.copy()
     env['PYTHONPATH'] = os.path.abspath(os.path.dirname(__file__))
