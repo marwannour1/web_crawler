@@ -183,5 +183,5 @@ class DynamoDBBackend(KeyValueStoreBackend):
         return json.loads(base64.b64decode(data.encode()).decode())
 
 # Register the backend
-from celery.backends.base import Backend
-Backend.register('dynamodb', 'aws_dynamodb_backend.DynamoDBBackend')
+from celery import backends
+backends.BACKEND_ALIASES['dynamodb'] = 'aws_dynamodb_backend.DynamoDBBackend'
