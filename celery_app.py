@@ -36,7 +36,7 @@ try:
         task_track_started=True,
 
         # Set result backend for simplicity
-        result_backend='rpc://',
+        result_backend=None,
         task_ignore_result=True,
 
         worker_send_Task_events=False,
