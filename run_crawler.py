@@ -59,8 +59,9 @@ def start_crawler_workers():
 
     logger.info(f"Starting {num_workers} crawler workers connected to AWS SQS")
 
+    # THIS IS THE CRITICAL PART - Import tasks FIRST
     import tasks
-
+    # Add these lines to ensure task registration:
     from tasks import crawl, index
     logger.info(f"Tasks registered: crawl={crawl.name}, index={index.name}")
 
@@ -74,7 +75,11 @@ def start_crawler_workers():
         '--concurrency', str(num_workers),
         '-Q', 'crawler',  # Only process crawler tasks
         '-n', f'crawler@{NODE_TYPE}',
-        '-P', 'solo'
+        '-P', 'solo',
+        # Add these options to disable features that need dynamic queues
+        '--without-gossip',
+        '--without-mingle',
+        '--without-heartbeat'
     ], env=env)
 
     logger.info("Crawler workers started successfully")
