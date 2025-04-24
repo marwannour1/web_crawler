@@ -39,6 +39,10 @@ try:
         result_backend='rpc://',
         task_ignore_result=True,
 
+        worker_send_Task_events=False,
+        worker_enable_remote_control=False,
+        task_send_sent_event=False,
+
         # SQS broker configuration
         broker_transport_options={
             'region': AWS_REGION,
