@@ -42,18 +42,22 @@ def print_config(config):
     print("-" * 50)
 
 def monitor_tasks(task_ids, max_runtime=300, status_interval=5):
-    """Monitor task progress by watching S3 (SQS compatible)"""
+    """Monitor task progress and shutdown nodes when crawling is complete"""
     print(f"\nMonitoring {len(task_ids)} crawler tasks...")
 
     try:
-        # Use S3 monitoring instead of AsyncResult/Inspector
         from aws_config import S3_BUCKET_NAME, S3_OUTPUT_PREFIX, ensure_aws_clients
         ensure_aws_clients()
         from aws_config import s3_client
 
-        # Get initial count of objects in S3
+        # Get initial count
         initial_count = count_s3_objects(S3_OUTPUT_PREFIX)
         print(f"Initial content count in S3: {initial_count}")
+
+        # Track when count stabilizes
+        stable_count = initial_count
+        stable_since = time.time()
+        no_change_duration = 0
 
         # Monitor progress with overall timeout
         start_time = time.time()
@@ -62,26 +66,133 @@ def monitor_tasks(task_ids, max_runtime=300, status_interval=5):
             # Check timeouts
             elapsed_time = time.time() - start_time
             if elapsed_time > max_runtime:
-                print("\nMaximum runtime exceeded. Stopping monitoring.")
+                print("\nMaximum runtime exceeded. Initiating shutdown sequence.")
+                trigger_shutdown()
                 break
+
+            # Sleep before checking again
+            time.sleep(status_interval)
 
             # Check S3 for new content
             current_count = count_s3_objects(S3_OUTPUT_PREFIX)
             new_items = current_count - initial_count
 
-            print(f"\r[{time.strftime('%H:%M:%S')}] Processing... S3 objects: {current_count} " +
-                  f"(+{new_items} since start)", end="", flush=True)
+            # If count changed, reset the stability timer
+            if current_count != stable_count:
+                stable_count = current_count
+                stable_since = time.time()
+                no_change_duration = 0
+            else:
+                no_change_duration = time.time() - stable_since
 
-            # If no new items for a while and some time has passed, assume completion
-            if elapsed_time > 60 and new_items == 0:
-                print("\nNo new content for a minute. Assuming completion.")
+            print(f"\r[{time.strftime('%H:%M:%S')}] Processing... S3 objects: {current_count} " +
+                  f"(+{new_items} since start, stable for {int(no_change_duration)}s)", end="", flush=True)
+
+            # If no new items for 2 minutes and some processing has occurred, assume completion
+            if no_change_duration > 120 and current_count > initial_count:
+                print("\nNo new content for 2 minutes. Crawling complete. Initiating shutdown sequence.")
+                trigger_shutdown()
                 break
 
-            time.sleep(status_interval)
     except KeyboardInterrupt:
         print("\nMonitoring stopped by user.")
     except Exception as e:
         print(f"\nError in monitoring: {e}")
+
+def trigger_shutdown():
+    """Send shutdown signals to crawler and indexer nodes"""
+    from distributed_config import CRAWLER_IP, INDEXER_IP
+    import requests
+
+    print("\n==== Initiating Graceful Shutdown Sequence ====")
+
+    # Step 1: Shutdown crawler nodes
+    try:
+        print("Sending shutdown signal to crawler node...")
+        resp = requests.post(f"http://{CRAWLER_IP}:8080/shutdown", timeout=3)
+        print(f"Crawler node shutdown response: {resp.status_code}")
+    except Exception as e:
+        print(f"Error shutting down crawler node: {e}")
+
+    # Wait a few seconds for crawler to finish
+    print("Waiting for crawler node to shutdown...")
+    time.sleep(5)
+
+    # Step 2: Shutdown indexer nodes
+    try:
+        print("Sending shutdown signal to indexer node...")
+        resp = requests.post(f"http://{INDEXER_IP}:8080/shutdown", timeout=3)
+        print(f"Indexer node shutdown response: {resp.status_code}")
+    except Exception as e:
+        print(f"Error shutting down indexer node: {e}")
+
+    # Step 3: Shutdown master
+    print("Shutting down master node...")
+    time.sleep(3)  # Give time to print messages
+    os._exit(0)  # Exit without waiting for threads
+
+
+def check_queue_status():
+    """Check if there are any pending tasks in the queues"""
+    try:
+        from aws_config import sqs_client, SQS_CRAWLER_QUEUE_NAME, SQS_INDEXER_QUEUE_NAME
+
+        # Get queue URLs
+        crawler_queue_url = sqs_client.get_queue_url(QueueName=SQS_CRAWLER_QUEUE_NAME)['QueueUrl']
+        indexer_queue_url = sqs_client.get_queue_url(QueueName=SQS_INDEXER_QUEUE_NAME)['QueueUrl']
+
+        # Get approximate number of messages
+        crawler_attrs = sqs_client.get_queue_attributes(
+            QueueUrl=crawler_queue_url,
+            AttributeNames=['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible']
+        )
+        indexer_attrs = sqs_client.get_queue_attributes(
+            QueueUrl=indexer_queue_url,
+            AttributeNames=['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible']
+        )
+
+        # Count total messages (both visible and in flight)
+        crawler_messages = (
+            int(crawler_attrs['Attributes']['ApproximateNumberOfMessages']) +
+            int(crawler_attrs['Attributes']['ApproximateNumberOfMessagesNotVisible'])
+        )
+        indexer_messages = (
+            int(indexer_attrs['Attributes']['ApproximateNumberOfMessages']) +
+            int(indexer_attrs['Attributes']['ApproximateNumberOfMessagesNotVisible'])
+        )
+
+        return {
+            "crawler_queue": crawler_messages,
+            "indexer_queue": indexer_messages,
+            "total_pending": crawler_messages + indexer_messages
+        }
+    except Exception as e:
+        print(f"Error checking queue status: {e}")
+        return {"error": str(e)}
+
+
+def mark_crawl_as_complete(task_ids):
+    """Mark that a crawl session is complete in S3"""
+    from aws_config import S3_BUCKET_NAME, ensure_aws_clients
+    ensure_aws_clients()
+    from aws_config import s3_client
+
+    try:
+        completion_data = {
+            "completed_at": time.time(),
+            "task_ids": task_ids,
+            "status": "completed"
+        }
+
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key="status/crawl_completed.json",
+            Body=json.dumps(completion_data),
+            ContentType='application/json'
+        )
+        print("Crawl session marked as complete in S3")
+    except Exception as e:
+        print(f"Error marking crawl as complete: {e}")
 
 # Add the S3 counting function as well
 def count_s3_objects(prefix):

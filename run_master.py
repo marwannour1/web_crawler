@@ -75,45 +75,8 @@ def monitor_tasks_without_inspector(task_ids, max_runtime=300, status_interval=5
     """Monitor task progress without using Celery inspector (SQS compatible)"""
     print(f"\nMonitoring {len(task_ids)} crawler tasks...")
 
-    try:
-        # Monitor task progress with overall timeout
-        start_time = time.time()
-
-        # With SQS, we can't easily monitor task status, so just wait for some time
-        # polling S3 instead to see new content
-        from aws_config import S3_BUCKET_NAME, S3_OUTPUT_PREFIX, ensure_aws_clients, s3_client
-        ensure_aws_clients()
-
-        # Get initial count
-        initial_count = count_s3_objects(S3_OUTPUT_PREFIX)
-        print(f"Initial content count in S3: {initial_count}")
-
-        while True:
-            # Check timeouts
-            elapsed_time = time.time() - start_time
-            if elapsed_time > max_runtime:
-                print("\nMaximum runtime exceeded. Stopping monitoring.")
-                break
-
-            # Sleep before checking again
-            time.sleep(status_interval)
-
-            # Check S3 for new content
-            current_count = count_s3_objects(S3_OUTPUT_PREFIX)
-            new_items = current_count - initial_count
-
-            print(f"\r[{time.strftime('%H:%M:%S')}] Processing... S3 objects: {current_count} " +
-                  f"(+{new_items} since start)", end="", flush=True)
-
-            # If no new items for a while and some time has passed, assume completion
-            if elapsed_time > 60 and new_items == 0:
-                print("\nNo new content for a minute. Assuming completion.")
-                break
-
-    except KeyboardInterrupt:
-        print("\nMonitoring stopped by user.")
-    except Exception as e:
-        print(f"\nError in monitoring: {e}")
+    from crawler_cli import monitor_tasks
+    monitor_tasks(task_ids, max_runtime, status_interval)
 
 def count_s3_objects(prefix):
     """Count objects in S3 with a given prefix"""

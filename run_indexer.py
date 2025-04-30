@@ -96,6 +96,24 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         return
 
+    def do_POST(self):
+        if self.path == '/shutdown':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b"Shutting down crawler node")
+
+            # Schedule the shutdown after responding to the request
+            threading.Thread(target=self._shutdown).start()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def _shutdown(self):
+        """Shutdown the node gracefully after a short delay"""
+        time.sleep(1)  # Give the response time to complete
+        os.kill(os.getpid(), signal.SIGTERM)  # Send SIGTERM to current process
+
 def check_opensearch():
     """Check if AWS OpenSearch is running and accessible"""
     try:
