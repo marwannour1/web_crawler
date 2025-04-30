@@ -46,31 +46,62 @@ def print_header(title):
     print(f"{Colors.BOLD}{Colors.BLUE}{title.center(60)}{Colors.ENDC}")
     print(f"{Colors.BOLD}{Colors.BLUE}{'=' * 60}{Colors.ENDC}\n")
 
-def print_result(i, result, show_highlights=True, max_highlight_len=100):
-    """Print a single search result with formatting and highlighting"""
-    print(f"{Colors.BOLD}{i}. {Colors.GREEN}{result['title']}{Colors.ENDC} {Colors.BLUE}(Score: {result['score']:.2f}){Colors.ENDC}")
+def print_result(i, result, show_highlights=True, max_highlight_len=150):
+    """Print a single search result with clean, readable formatting"""
+    # 1. Title and score
+    print(f"{Colors.BOLD}{i}. {Colors.GREEN}{result['title']}{Colors.ENDC}")
+
+    # 2. URL (most important identifier)
     print(f"   {Colors.UNDERLINE}{result['url']}{Colors.ENDC}")
 
-    if 's3_key' in result and result['s3_key']:
-        print(f"   {Colors.CYAN}S3: {result['s3_key']}{Colors.ENDC}")
-
+    # 3. Description (clean format)
     description = result['description']
     if len(description) > 100:
         description = description[:97] + "..."
     print(f"   {description}")
 
+    # 4. Cleaner highlights (if available)
     if show_highlights and "highlights" in result:
-        if "text_content" in result["highlights"] and result["highlights"]["text_content"]:
-            print(f"\n   {Colors.BOLD}Highlights:{Colors.ENDC}")
-            for i, fragment in enumerate(result["highlights"]["text_content"]):
-                # Trim fragment if too long
-                if len(fragment) > max_highlight_len:
-                    fragment = "..." + fragment[:max_highlight_len] + "..."
-                print(f"   {i+1}. {fragment}")
-        elif "title" in result["highlights"]:
-            print(f"   {Colors.BOLD}Matched in title:{Colors.ENDC} {result['highlights']['title'][0]}")
-    print()
+        highlights = []
 
+        # Process text content highlights
+        if "text_content" in result["highlights"] and result["highlights"]["text_content"]:
+            for fragment in result["highlights"]["text_content"]:
+                # Clean up the fragment
+                clean = clean_highlight(fragment)
+                if clean and len(clean.strip()) > 10:  # Only show meaningful highlights
+                    highlights.append(clean)
+
+        # Process title highlights
+        if "title" in result["highlights"] and result["highlights"]["title"]:
+            clean = clean_highlight(result["highlights"]["title"][0])
+            if clean:
+                highlights.append(f"Title match: {clean}")
+
+        # Display cleaned highlights (max 2)
+        if highlights:
+            print(f"\n   {Colors.BOLD}Key matches:{Colors.ENDC}")
+            for idx, highlight in enumerate(highlights[:2]):  # Limit to 2 most relevant
+                print(f"   • {highlight}")
+
+    print()  # Add space between results
+
+def clean_highlight(text):
+    """Clean up highlight fragments to make them readable"""
+    # Replace HTML tags with proper formatting
+    text = text.replace('<em>', f"{Colors.BOLD}")
+    text = text.replace('</em>', f"{Colors.ENDC}")
+
+    # Remove excessive whitespace
+    text = re.sub(r'\s+', ' ', text)
+
+    # Remove HTML fragments
+    text = re.sub(r'<[^>]+>', '', text)
+
+    # Clean up any markdown-style markers
+    text = re.sub(r'\*\*', '', text)
+
+    return text.strip()
 
 def search_files(query, output_dir='output', show_progress=True):
     """
@@ -276,7 +307,7 @@ def search_content(query, config_file='crawler_config.json', show_progress=True,
             return []
 
 def search_s3(query, config, show_progress=True):
-    """Search content in S3 bucket with improved display"""
+    """Search content in S3 bucket with clean, readable results"""
     from aws_config import S3_BUCKET_NAME, S3_OUTPUT_PREFIX
     from aws_config import ensure_aws_clients, s3_client
 
@@ -303,7 +334,7 @@ def search_s3(query, config, show_progress=True):
 
         # Process only JSON files
         json_files = [item['Key'] for item in response['Contents']
-                      if item['Key'].endswith('.json')]
+                    if item['Key'].endswith('.json')]
 
         if show_progress:
             print(f"{Colors.CYAN}Scanning {len(json_files)} files in S3...{Colors.ENDC}")
@@ -311,6 +342,7 @@ def search_s3(query, config, show_progress=True):
             total = len(json_files)
             progress_interval = max(1, total // 20)  # Update progress ~20 times
 
+        # Process files in batches for efficiency
         for i, key in enumerate(json_files):
             try:
                 # Show progress
@@ -339,51 +371,60 @@ def search_s3(query, config, show_progress=True):
                     score += description.count(term) * 2  # Description 2x more important
 
                 if score > 0:
-                    # Find highlights with context
-                    highlights = []
-                    text_lower = text.lower()
+                    # Extract meaningful sentences containing search terms
+                    # Split text into sentences (handling common abbreviations)
+                    text_content = content.get('text_content', '')
+                    # Simple sentence splitting with regex
+                    sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?|\!)\s', text_content)
 
-                    # Find sentence fragments containing the terms
-                    for term in query_terms:
-                        term_pos = 0
-                        while term_pos != -1:
-                            term_pos = text_lower.find(term, term_pos)
-                            if term_pos == -1:
+                    # Find sentences with query terms
+                    matching_sentences = []
+                    for sentence in sentences:
+                        sentence = sentence.strip()
+                        # Only consider reasonably sized sentences
+                        if 20 <= len(sentence) <= 300:
+                            sentence_lower = sentence.lower()
+                            for term in query_terms:
+                                if term in sentence_lower:
+                                    # Format the sentence to highlight the term
+                                    highlighted = re.sub(
+                                        r'(?i)\b(' + re.escape(term) + r')\b',
+                                        f"<em>\\1</em>",
+                                        sentence
+                                    )
+                                    matching_sentences.append(highlighted)
+                                    break  # One match per sentence is enough
+
+                    # Limit and deduplicate sentences
+                    unique_sentences = []
+                    for sentence in matching_sentences:
+                        # Check if this sentence is too similar to ones we already have
+                        is_duplicate = False
+                        for existing in unique_sentences:
+                            # Compare without HTML tags
+                            clean_sentence = re.sub(r'<[^>]+>', '', sentence).lower()
+                            clean_existing = re.sub(r'<[^>]+>', '', existing).lower()
+
+                            # If 50% similarity, consider a duplicate
+                            if len(clean_sentence) > 0 and len(clean_existing) > 0:
+                                similarity = difflib.SequenceMatcher(None, clean_sentence, clean_existing).ratio()
+                                if similarity > 0.5:
+                                    is_duplicate = True
+                                    break
+
+                        if not is_duplicate:
+                            unique_sentences.append(sentence)
+                            if len(unique_sentences) >= 2:  # Limit to 2 unique sentences
                                 break
 
-                            # Get context around the term (75 chars before and after)
-                            start = max(0, term_pos - 75)
-                            end = min(len(text), term_pos + len(term) + 75)
-                            context = text[start:end].strip()
-
-                            # Add ellipsis if we truncated
-                            if start > 0:
-                                context = "..." + context
-                            if end < len(text):
-                                context = context + "..."
-
-                            highlights.append(context)
-                            term_pos += len(term)
-
-                            # Limit to 3 highlights per term
-                            if len(highlights) >= 3:
-                                break
-
-                    # Deduplicate and limit highlights
-                    unique_highlights = []
-                    for h in highlights:
-                        if h not in unique_highlights:
-                            unique_highlights.append(h)
-                            if len(unique_highlights) >= 3:
-                                break
-
+                    # Create result entry
                     results.append({
                         "score": score,
                         "url": content.get('url', ''),
                         "title": content.get('title', 'Unknown Title'),
                         "description": content.get('description', ''),
                         "s3_key": key,
-                        "highlights": {"text_content": unique_highlights},
+                        "highlights": {"text_content": unique_sentences},
                         "date": datetime.fromtimestamp(content.get('crawl_timestamp', 0)).strftime('%Y-%m-%d %H:%M')
                     })
 
@@ -410,6 +451,7 @@ def search_s3(query, config, show_progress=True):
         if show_progress:
             print(f"{Colors.RED}Error searching S3: {e}{Colors.ENDC}")
         return []
+
 
 def interactive_search():
     """Interactive search interface with pagination and options"""
