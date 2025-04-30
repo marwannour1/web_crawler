@@ -72,49 +72,60 @@ def init_aws_clients():
         logger.error(f"Failed to initialize AWS clients: {e}")
         return False
 
-def fix_dynamodb_table():
+def fix_dynamodb_table(force_recreate=False):
     """Fix the DynamoDB table schema to work with Celery"""
     try:
         ensure_aws_clients()
+        table_exists = False
 
         # Check if table exists
         try:
             response = dynamodb_client.describe_table(TableName=DYNAMODB_TABLE_NAME)
             logger.info(f"Table {DYNAMODB_TABLE_NAME} exists, checking schema...")
+            table_exists = True
 
-            # Check if the table has the correct schema
-            # Look for 'id' attribute and 'expires' TTL
-            try:
-                ttl_response = dynamodb_client.describe_time_to_live(
-                    TableName=DYNAMODB_TABLE_NAME
-                )
+            # If force_recreate is True, delete the table regardless of schema
+            if force_recreate and table_exists:
+                logger.info(f"Force recreating table {DYNAMODB_TABLE_NAME}")
+                dynamodb_client.delete_table(TableName=DYNAMODB_TABLE_NAME)
 
-                has_correct_ttl = (
-                    'TimeToLiveDescription' in ttl_response and
-                    ttl_response['TimeToLiveDescription'].get('AttributeName') == 'expires' and
-                    ttl_response['TimeToLiveDescription'].get('TimeToLiveStatus') == 'ENABLED'
-                )
-
-                # If table has correct schema, just return
-                if has_correct_ttl:
-                    logger.info(f"Table {DYNAMODB_TABLE_NAME} has correct schema, no changes needed")
-                    return True
-                else:
-                    logger.info(f"Table {DYNAMODB_TABLE_NAME} has incorrect schema, updating TTL")
-                    # Just update the TTL instead of recreating
-                    dynamodb_client.update_time_to_live(
-                        TableName=DYNAMODB_TABLE_NAME,
-                        TimeToLiveSpecification={
-                            'Enabled': True,
-                            'AttributeName': 'expires'
-                        }
+                waiter = dynamodb_client.get_waiter('table_not_exists')
+                waiter.wait(TableName=DYNAMODB_TABLE_NAME)
+                logger.info(f"Table {DYNAMODB_TABLE_NAME} deleted successfully")
+                table_exists = False
+            else:
+                # Check if the table has the correct schema
+                # Look for 'id' attribute and 'expires' TTL
+                try:
+                    ttl_response = dynamodb_client.describe_time_to_live(
+                        TableName=DYNAMODB_TABLE_NAME
                     )
-                    logger.info(f"Updated TTL for {DYNAMODB_TABLE_NAME}")
-                    return True
-            except Exception as e:
-                logger.warning(f"Error checking TTL: {e}. Will recreate table.")
-                # Continue to recreation
 
+                    has_correct_ttl = (
+                        'TimeToLiveDescription' in ttl_response and
+                        ttl_response['TimeToLiveDescription'].get('AttributeName') == 'expires' and
+                        ttl_response['TimeToLiveDescription'].get('TimeToLiveStatus') == 'ENABLED'
+                    )
+
+                    # If table has correct schema, just return
+                    if has_correct_ttl:
+                        logger.info(f"Table {DYNAMODB_TABLE_NAME} has correct schema, no changes needed")
+                        return True
+                    else:
+                        logger.info(f"Table {DYNAMODB_TABLE_NAME} has incorrect schema, updating TTL")
+                        # Just update the TTL instead of recreating
+                        dynamodb_client.update_time_to_live(
+                            TableName=DYNAMODB_TABLE_NAME,
+                            TimeToLiveSpecification={
+                                'Enabled': True,
+                                'AttributeName': 'expires'
+                            }
+                        )
+                        logger.info(f"Updated TTL for {DYNAMODB_TABLE_NAME}")
+                        return True
+                except Exception as e:
+                    logger.warning(f"Error checking TTL: {e}. Will recreate table.")
+                    # Continue to recreation
         except ClientError as e:
             if e.response['Error']['Code'] != 'ResourceNotFoundException':
                 logger.error(f"Error checking table: {e}")
@@ -171,6 +182,8 @@ def fix_dynamodb_table():
     except Exception as e:
         logger.error(f"Error fixing DynamoDB table: {e}")
         return False
+
+
 
 def test_opensearch_connection():
     """Test and determine the best OpenSearch authentication method"""

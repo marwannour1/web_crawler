@@ -285,6 +285,139 @@ def show_status(args):
     except Exception as e:
         print(f"Error getting status: {e}")
 
+
+
+def purge_data(args):
+    """Purge all crawled data from S3, DynamoDB and OpenSearch"""
+    if not args.force:
+        print("\n⚠️ WARNING: This will permanently delete all crawled data! ⚠️")
+        print("This includes:")
+        print("  - All content stored in S3 bucket")
+        print("  - All task data in DynamoDB table")
+        print("  - All indexed content in OpenSearch")
+
+        confirm = input("\nType 'yes' to confirm purge: ").strip().lower()
+        if confirm != 'yes':
+            print("Purge operation cancelled.")
+            return
+
+    print("Starting data purge operation...")
+    success = True
+
+    # 1. Purge S3 content
+    try:
+        print("Purging content from S3...")
+        from aws_config import S3_BUCKET_NAME, S3_OUTPUT_PREFIX, ensure_aws_clients
+        ensure_aws_clients()
+        from aws_config import s3_client
+
+        # List objects in output directory
+        paginator = s3_client.get_paginator('list_objects_v2')
+        page_iterator = paginator.paginate(
+            Bucket=S3_BUCKET_NAME,
+            Prefix=S3_OUTPUT_PREFIX
+        )
+
+        # Count total objects
+        total_objects = 0
+        for page in page_iterator:
+            if 'Contents' in page:
+                total_objects += len(page['Contents'])
+
+        if total_objects == 0:
+            print("No content found in S3 output directory.")
+        else:
+            print(f"Found {total_objects} objects to delete")
+
+            # Delete objects in batches
+            deleted_count = 0
+            for page in paginator.paginate(Bucket=S3_BUCKET_NAME, Prefix=S3_OUTPUT_PREFIX):
+                if 'Contents' in page:
+                    objects_to_delete = [{'Key': obj['Key']} for obj in page['Contents']]
+                    s3_client.delete_objects(
+                        Bucket=S3_BUCKET_NAME,
+                        Delete={'Objects': objects_to_delete}
+                    )
+                    deleted_count += len(objects_to_delete)
+                    print(f"Deleted {deleted_count}/{total_objects} objects...", end="\r")
+            print(f"\nSuccessfully deleted {deleted_count} objects from S3.")
+    except Exception as e:
+        print(f"Error purging S3 data: {e}")
+        success = False
+
+    # 2. Clear DynamoDB table
+    try:
+        print("\nClearing DynamoDB table...")
+        from aws_config import DYNAMODB_TABLE_NAME, ensure_aws_clients
+        ensure_aws_clients()
+        from aws_config import dynamodb_client
+
+        # Instead of deleting individual items, recreate the table
+        # This is much faster for complete purges
+        from aws_config import fix_dynamodb_table
+        if fix_dynamodb_table(force_recreate=True):
+            print("Successfully recreated DynamoDB table.")
+        else:
+            print("Failed to recreate DynamoDB table.")
+            success = False
+    except Exception as e:
+        print(f"Error clearing DynamoDB table: {e}")
+        success = False
+
+    # 3. Clear OpenSearch index
+    try:
+        print("\nClearing OpenSearch index...")
+        from distributed_config import OPENSEARCH_ENDPOINT
+
+        if OPENSEARCH_ENDPOINT:
+            # Determine which authentication method to use
+            auth_method = "aws4auth"  # Default
+            try:
+                with open("opensearch_auth_method.txt", "r") as f:
+                    auth_method = f.read().strip()
+            except (FileNotFoundError, IOError):
+                pass
+
+            # Load config to get index name
+            from crawler_config import CrawlerConfig
+            config = CrawlerConfig().get_config()
+            index_name = config.get('elasticsearch_index', 'webcrawler')
+
+            # Get OpenSearch connection
+            from distributed_config import AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+            from distributed_config import OPENSEARCH_USER, OPENSEARCH_PASS
+            from requests_aws4auth import AWS4Auth
+            import requests
+
+            if auth_method == "aws4auth":
+                auth = AWS4Auth(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, 'es')
+                delete_response = requests.delete(
+                    f"{OPENSEARCH_ENDPOINT}/{index_name}",
+                    auth=auth
+                )
+            else:
+                delete_response = requests.delete(
+                    f"{OPENSEARCH_ENDPOINT}/{index_name}",
+                    auth=(OPENSEARCH_USER, OPENSEARCH_PASS)
+                )
+
+            if delete_response.status_code in [200, 404]:
+                print(f"Successfully deleted OpenSearch index '{index_name}'.")
+            else:
+                print(f"Failed to delete OpenSearch index: {delete_response.text}")
+                success = False
+        else:
+            print("OpenSearch endpoint not configured, skipping index deletion.")
+    except Exception as e:
+        print(f"Error clearing OpenSearch index: {e}")
+        success = False
+
+    if success:
+        print("\n✅ Data purge completed successfully! Ready for a fresh crawl.")
+    else:
+        print("\n⚠️ Data purge completed with some errors. Check the logs for details.")
+
+
 def search_crawler(args):
     """Search indexed content"""
     if not args.query:
@@ -474,6 +607,10 @@ def main():
     config_parser = subparsers.add_parser("config", help="Configure crawler settings")
     config_parser.add_argument("--interactive", "-i", action="store_true", help="Interactive configuration")
 
+        # Purge command
+    purge_parser = subparsers.add_parser("purge", help="Purge all crawled data from S3, DynamoDB, and OpenSearch")
+    purge_parser.add_argument("--force", "-f", action="store_true", help="Skip confirmation prompt")
+
     # Fix command for AWS resources
     fix_parser = subparsers.add_parser("fix", help="Fix/initialize AWS resources")
 
@@ -489,6 +626,8 @@ def main():
         configure(args)
     elif args.command == "list":
         list_s3_content(args)
+    elif args.command == "purge":
+        purge_data(args)
     elif args.command == "fix":
         fix_resources(args)
     else:
