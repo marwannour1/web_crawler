@@ -202,7 +202,7 @@ def start_indexer_workers():
 def setup_opensearch_auth():
     """Determine the best authentication method for OpenSearch"""
     try:
-        from opensearch_fix import test_opensearch_connection
+        from aws_config import test_opensearch_connection
         success, auth_method = test_opensearch_connection()
         if success:
             logger.info(f"OpenSearch connection successful using {auth_method} authentication")

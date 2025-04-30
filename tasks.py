@@ -93,19 +93,32 @@ def crawl(self, url, depth=0, config=None):
         # Extract text content
         text_content = soup.get_text()
 
+
         # Prepare structured content for Elasticsearch and S3
         content = {
             'url': url,
             'title': title,
             'description': description,
-            'text_content': text_content,
             'html': response.text,
+            'text_content': text_content,
             'crawl_timestamp': int(time.time()),
             'depth': depth
         }
 
-        # Schedule indexing task
-        index.delay(content, url, config)
+        s3_key = save_to_s3(content, url)
+
+        if s3_key:
+            # Create minimal message for SQS (avoids size limits)
+            indexer_message = {
+                'url': url,
+                's3_key': s3_key,  # Only send the S3 key, not full content
+                'depth': depth
+            }
+            index.delay(indexer_message, url, config)
+
+        else:
+            logger.error(f"Failed to save content to S3 for {url}")
+
 
         # Schedule crawling of new URLs if not at max depth
         if depth < config['max_depth']:
@@ -127,7 +140,7 @@ def crawl(self, url, depth=0, config=None):
         return {'status': 'error', 'url': url, 'error': str(e)}
 
 @app.task(name='tasks.index')
-def index(content, url, config):
+def index(content_indexer, url, config):
     """Indexer task that processes and indexes web content using OpenSearch and S3"""
     logger.info(f"Indexer processing content from: {url}")
 
@@ -136,11 +149,17 @@ def index(content, url, config):
 
     try:
         # First store content in S3 - this is the primary storage
-        s3_key = save_to_s3(content, url)
-        if not s3_key:
-            raise Exception("Failed to save content to S3")
+        s3_key = content_indexer['s3_key']
+        logger.info(f"Retrieving content from S3 key: {s3_key}")
 
-        logger.info(f"Saved content to S3: {url} -> {s3_key}")
+        # Retrieve content from S3
+        from s3_storage import retrieve_from_s3
+        content = retrieve_from_s3(key=s3_key)
+
+        if not content:
+            raise Exception(f"Failed to retrieve content from S3 key: {s3_key}")
+
+        logger.info(f"Successfully retrieved content from S3 for {url}")
 
         # Connect to AWS OpenSearch if configured
         if USE_AWS_OPENSEARCH:
