@@ -5,8 +5,6 @@
 Master node script: initializes AWS services and coordinates the crawl process.
 The master node is responsible for managing the overall crawler process.
 """
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import json
 import os
 import sys
 import time
