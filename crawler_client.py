@@ -192,7 +192,7 @@ def get_crawl_stats():
     return stats
 
 def start_all_components():
-    """Start all components of the crawler system"""
+    """Start all components of the crawler system using SSH for remote execution"""
     print(f"\n{Colors.CYAN}Starting all crawler components...{Colors.ENDC}")
 
     # Check if components are already running
@@ -215,31 +215,50 @@ def start_all_components():
 
     print(f"\n{Colors.CYAN}Launching system components...{Colors.ENDC}")
 
+    # Set up SSH key path - update this to your EC2 key location
+    ssh_key_path = os.environ.get('AWS_SSH_KEY_PATH', '~/.ssh/aws-key.pem')
+    ssh_user = os.environ.get('AWS_SSH_USER', 'ec2-user')
+    ssh_options = "-o StrictHostKeyChecking=no -o ConnectTimeout=5"
+
     # 1. Start master (if needed)
     if status["master"]["status"] != "RUNNING":
         print(f"Starting master node on {MASTER_IP}...")
-        # In a production system, you would use SSH to start the process on the remote machine
-        # For now, we'll simulate the start with a local command
-        subprocess.Popen(["python3", "run_master.py"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        time.sleep(2)
+        try:
+            # Use SSH to start the process on the remote machine
+            ssh_cmd = f"ssh {ssh_options} -i {ssh_key_path} {ssh_user}@{MASTER_IP} 'cd ~/web_crawler && nohup python3 run_master.py > master.out 2>&1 &'"
+            os.system(ssh_cmd)
+            print(f"Master startup command sent to {MASTER_IP}")
+        except Exception as e:
+            print(f"{Colors.RED}Error starting master node: {e}{Colors.ENDC}")
+        time.sleep(3)  # Give more time for startup
 
     # 2. Start crawler (if needed)
     if status["crawler"]["status"] != "RUNNING":
         print(f"Starting crawler node on {CRAWLER_IP}...")
-        # In a production system, use SSH to start on the remote machine
-        subprocess.Popen(["python3", "run_crawler.py"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        time.sleep(2)
+        try:
+            # Use SSH to start on the remote machine
+            ssh_cmd = f"ssh {ssh_options} -i {ssh_key_path} {ssh_user}@{CRAWLER_IP} 'cd ~/web_crawler && nohup python3 run_crawler.py > crawler.out 2>&1 &'"
+            os.system(ssh_cmd)
+            print(f"Crawler startup command sent to {CRAWLER_IP}")
+        except Exception as e:
+            print(f"{Colors.RED}Error starting crawler node: {e}{Colors.ENDC}")
+        time.sleep(3)  # Give more time for startup
 
     # 3. Start indexer (if needed)
     if status["indexer"]["status"] != "RUNNING":
         print(f"Starting indexer node on {INDEXER_IP}...")
-        # In a production system, use SSH to start on the remote machine
-        subprocess.Popen(["python3", "run_indexer.py"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        time.sleep(2)
+        try:
+            # Use SSH to start on the remote machine
+            ssh_cmd = f"ssh {ssh_options} -i {ssh_key_path} {ssh_user}@{INDEXER_IP} 'cd ~/web_crawler && nohup python3 run_indexer.py > indexer.out 2>&1 &'"
+            os.system(ssh_cmd)
+            print(f"Indexer startup command sent to {INDEXER_IP}")
+        except Exception as e:
+            print(f"{Colors.RED}Error starting indexer node: {e}{Colors.ENDC}")
+        time.sleep(3)  # Give more time for startup
 
-    # Wait for startup and check status
+    # Wait for startup and check status (longer wait time)
     print(f"\n{Colors.CYAN}Waiting for components to initialize...{Colors.ENDC}")
-    time.sleep(5)
+    time.sleep(15)  # Give nodes more time to start up
 
     status = check_node_status()
     all_running = all(node["status"] == "RUNNING" for node in status.values())
@@ -253,6 +272,11 @@ def start_all_components():
             print(f"  - {node.capitalize()}: {status_color}{info['status']}{Colors.ENDC}")
             if info["message"]:
                 print(f"    Error: {info['message']}")
+
+        print(f"\n{Colors.CYAN}You may need to manually start components on each server:{Colors.ENDC}")
+        print(f"  Master: ssh {ssh_user}@{MASTER_IP} 'cd ~/web_crawler && python3 run_master.py'")
+        print(f"  Crawler: ssh {ssh_user}@{CRAWLER_IP} 'cd ~/web_crawler && python3 run_crawler.py'")
+        print(f"  Indexer: ssh {ssh_user}@{INDEXER_IP} 'cd ~/web_crawler && python3 run_indexer.py'")
 
 def show_dashboard():
     """Display the crawler system dashboard"""
