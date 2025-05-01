@@ -358,6 +358,24 @@ def start_new_crawl():
         if confirm.lower() != 'y':
             return
 
+        status = check_node_status()
+        all_running = all(node["status"] == "RUNNING" for node in status.values())
+
+        if not all_running:
+            print(f"\n{Colors.WARNING}Not all required nodes are running:{Colors.ENDC}")
+            for node, info in status.items():
+                status_color = Colors.GREEN if info["status"] == "RUNNING" else Colors.RED
+                print(f"  - {node.capitalize()}: {status_color}{info['status']}{Colors.ENDC}")
+
+            start_nodes = input(f"\n{Colors.BOLD}Start missing nodes before crawling? (y/n): {Colors.ENDC}")
+            if start_nodes.lower() == 'y':
+                print(f"\n{Colors.CYAN}Starting required nodes...{Colors.ENDC}")
+                start_all_components()
+            else:
+                print(f"\n{Colors.RED}Crawl can't be started without all nodes running.{Colors.ENDC}")
+                input("Press Enter to return to dashboard...")
+                return
+
         # Start the crawl
         print(f"\n{Colors.CYAN}Starting crawler...{Colors.ENDC}")
         task_ids = start_crawl()
