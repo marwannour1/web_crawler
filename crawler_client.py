@@ -37,6 +37,26 @@ class Colors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
+# ANSI cursor control codes
+class Cursor:
+    UP = '\033[A'
+    DOWN = '\033[B'
+    RIGHT = '\033[C'
+    LEFT = '\033[D'
+    SAVE = '\033[s'
+    RESTORE = '\033[u'
+    CLEAR_LINE = '\033[2K'
+    CLEAR_SCREEN = '\033[2J'
+    HOME = '\033[H'
+
+    @staticmethod
+    def move_to(row, col):
+        return f"\033[{row};{col}H"
+
+    @staticmethod
+    def clear_to_end():
+        return "\033[K"
+
 def clear_screen():
     """Clear the terminal screen"""
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -68,6 +88,46 @@ def check_aws_credentials():
         return False
 
     return True
+
+def ssh_execute(node_ip, command, description=None, return_output=False):
+    """Execute a command on a remote node using SSH"""
+    # Set up SSH configuration
+    ssh_key_path = os.environ.get('AWS_SSH_KEY_PATH', '~/.ssh/aws-key.pem')
+    ssh_user = os.environ.get('AWS_SSH_USER', 'ec2-user')
+    ssh_options = "-o StrictHostKeyChecking=no -o ConnectTimeout=5"
+
+    if description:
+        print(f"{Colors.CYAN}{description}{Colors.ENDC}")
+
+    try:
+        # Build full SSH command
+        ssh_cmd = f"ssh {ssh_options} -i {ssh_key_path} {ssh_user}@{node_ip} '{command}'"
+
+        # Execute command and capture output
+        result = subprocess.run(ssh_cmd, shell=True, timeout=30,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               universal_newlines=True)
+
+        if result.returncode == 0:
+            if description:
+                print(f"{Colors.GREEN}Command succeeded on {node_ip}{Colors.ENDC}")
+
+            if return_output:
+                return True, result.stdout
+            return True
+        else:
+            error_msg = result.stderr.strip() or "Unknown error"
+            print(f"{Colors.RED}Command failed on {node_ip}: {error_msg}{Colors.ENDC}")
+
+            if return_output:
+                return False, result.stderr
+            return False
+    except Exception as e:
+        print(f"{Colors.RED}SSH execution error for {node_ip}: {e}{Colors.ENDC}")
+
+        if return_output:
+            return False, str(e)
+        return False
 
 def check_node_status():
     """Check status of all crawler nodes"""
@@ -155,7 +215,7 @@ def get_crawl_stats():
                 except Exception:
                     pass
     except Exception as e:
-        print(f"{Colors.WARNING}Error getting S3 stats: {e}{Colors.ENDC}")
+        pass  # Suppress errors for in-place updates
 
     # Get queue stats
     try:
@@ -170,8 +230,8 @@ def get_crawl_stats():
                 int(attrs['Attributes']['ApproximateNumberOfMessages']) +
                 int(attrs['Attributes']['ApproximateNumberOfMessagesNotVisible'])
             )
-        except Exception as e:
-            print(f"{Colors.WARNING}Error getting crawler queue stats: {e}{Colors.ENDC}")
+        except Exception:
+            pass  # Suppress errors for in-place updates
 
         # Indexer queue
         try:
@@ -184,12 +244,62 @@ def get_crawl_stats():
                 int(attrs['Attributes']['ApproximateNumberOfMessages']) +
                 int(attrs['Attributes']['ApproximateNumberOfMessagesNotVisible'])
             )
-        except Exception as e:
-            print(f"{Colors.WARNING}Error getting indexer queue stats: {e}{Colors.ENDC}")
-    except Exception as e:
-        print(f"{Colors.WARNING}Error getting queue stats: {e}{Colors.ENDC}")
+        except Exception:
+            pass  # Suppress errors for in-place updates
+    except Exception:
+        pass  # Suppress errors for in-place updates
 
     return stats
+
+def prepare_nodes_for_crawl():
+    """Prepare all nodes for a new crawling operation with custom commands"""
+    print(f"\n{Colors.CYAN}Preparing nodes for crawl...{Colors.ENDC}")
+
+    success = True
+
+    # 1. Prepare master node
+    master_commands = [
+        "cd ~/web_crawler",
+        "git pull || echo 'No git repository'",  # Update to latest code if using git
+        "python3 run_master.py",  # Ensure master is ready
+    ]
+
+    master_result = ssh_execute(
+        MASTER_IP,
+        " && ".join(master_commands),
+        f"Preparing master node ({MASTER_IP})..."
+    )
+    success = success and master_result
+
+    # 2. Prepare crawler node
+    crawler_commands = [
+        "cd ~/web_crawler",
+        "git pull || echo 'No git repository'",  # Update to latest code if using git
+        "python3 run_crawler.py"
+    ]
+
+    crawler_result = ssh_execute(
+        CRAWLER_IP,
+        " && ".join(crawler_commands),
+        f"Preparing crawler node ({CRAWLER_IP})..."
+    )
+    success = success and crawler_result
+
+    # 3. Prepare indexer node
+    indexer_commands = [
+        "cd ~/web_crawler",
+        "git pull || echo 'No git repository'",  # Update to latest code if using git
+        "python3 run_indexer.py"
+    ]
+
+    indexer_result = ssh_execute(
+        INDEXER_IP,
+        " && ".join(indexer_commands),
+        f"Preparing indexer node ({INDEXER_IP})..."
+    )
+    success = success and indexer_result
+
+    return success
 
 def start_all_components():
     """Start all components of the crawler system using SSH for remote execution"""
@@ -278,8 +388,6 @@ def start_all_components():
         print(f"  Crawler: ssh {ssh_user}@{CRAWLER_IP} 'cd ~/web_crawler && python3 run_crawler.py'")
         print(f"  Indexer: ssh {ssh_user}@{INDEXER_IP} 'cd ~/web_crawler && python3 run_indexer.py'")
 
-
-
 def start_master_node():
     """Start just the master node"""
     print(f"\n{Colors.CYAN}Starting master node...{Colors.ENDC}")
@@ -304,7 +412,6 @@ def start_master_node():
     except Exception as e:
         print(f"{Colors.RED}Error starting master node: {e}{Colors.ENDC}")
         return False
-
 
 def start_new_crawl():
     """Start a new crawling operation"""
@@ -415,111 +522,201 @@ def start_new_crawl():
         input("Press Enter to return to dashboard...")
 
 def show_dashboard():
-    """Display the crawler system dashboard with auto-refresh"""
-    # Initialize auto-refresh
-    refresh_interval = 5  # Refresh every 5 seconds
+    """Display the crawler system dashboard with dynamic stat updates"""
+    # Initial setup
+    refresh_interval = 2  # Update stats every 2 seconds
     auto_refresh = True
-    last_refresh = 0
+
+    # Stats markers for finding positions to update
+    crawled_pages_marker = "CRAWLED_PAGES_MARKER"
+    crawl_queue_marker = "CRAWL_QUEUE_MARKER"
+    index_queue_marker = "INDEX_QUEUE_MARKER"
+
+    # Initial stats
+    prev_stats = {
+        "crawled_pages": 0,
+        "crawl_queue": 0,
+        "index_queue": 0
+    }
 
     try:
+        # Display the static dashboard elements
+        clear_screen()
+        print_banner()
+
+        # Get node status
+        status = check_node_status()
+
+        # Display components status
+        print(f"{Colors.BOLD}SYSTEM COMPONENTS STATUS{Colors.ENDC}")
+        print("=" * 60)
+
+        status_table = []
+        for node, info in status.items():
+            status_str = f"{Colors.GREEN}✓ RUNNING{Colors.ENDC}" if info["status"] == "RUNNING" else f"{Colors.RED}✗ {info['status']}{Colors.ENDC}"
+            status_table.append([node.capitalize(), status_str, info["message"]])
+
+        print(tabulate(status_table, headers=["Component", "Status", "Message"], tablefmt="simple"))
+
+        # Show option to start master if it's down
+        if status["master"]["status"] != "RUNNING":
+            print(f"\n{Colors.BOLD}[M] Start Master Node{Colors.ENDC}")
+
+        # Display crawling statistics section headers
+        print(f"\n{Colors.BOLD}CRAWLING STATISTICS{Colors.ENDC}")
+        print("=" * 60)
+
+        # Print the markers for the dynamic stats
+        print(f"Crawled Pages: {Colors.GREEN}{crawled_pages_marker}{Colors.ENDC}")
+        print(f"Crawler Queue: {Colors.CYAN}{crawl_queue_marker}{Colors.ENDC} tasks")
+        print(f"Indexer Queue: {Colors.CYAN}{index_queue_marker}{Colors.ENDC} tasks")
+
+        # Get positions of the markers
+        output = sys.stdout.write
+
+        # Get initial stats
+        stats = get_crawl_stats()
+
+        # Replace markers with initial values
+        # Save cursor position for later updates
+        sys.stdout.write(Cursor.SAVE)
+
+        # Find the lines with markers and update them
+        lines = []
+        for line in sys.stdout.buffer.readline():
+            lines.append(line.decode('utf-8').rstrip())
+
+        crawled_line = next((i for i, line in enumerate(lines) if crawled_pages_marker in line), None)
+        crawl_queue_line = next((i for i, line in enumerate(lines) if crawl_queue_marker in line), None)
+        index_queue_line = next((i for i, line in enumerate(lines) if index_queue_marker in line), None)
+
+        # Display options
+        print(f"\n{Colors.BOLD}COMMANDS{Colors.ENDC}")
+        print("=" * 60)
+        print(f"1. {Colors.CYAN}Start new crawl{Colors.ENDC}")
+        print(f"2. {Colors.CYAN}Search crawled content{Colors.ENDC}")
+        print(f"3. {Colors.CYAN}Purge crawled data{Colors.ENDC}")
+        print(f"4. {Colors.CYAN}View/modify configuration{Colors.ENDC}")
+        print(f"a. {Colors.CYAN}Toggle auto-refresh (currently {'ON' if auto_refresh else 'OFF'}){Colors.ENDC}")
+        print(f"m. {Colors.CYAN}Start master node{Colors.ENDC}")
+        print(f"r. {Colors.CYAN}Manual refresh{Colors.ENDC}")
+        print(f"q. {Colors.CYAN}Quit{Colors.ENDC}")
+
+        # Restore cursor for first update
+        sys.stdout.write(Cursor.RESTORE)
+
+        # Save the lines where we need to update stats
+        crawled_line = -11  # Lines from bottom
+        crawl_queue_line = -10
+        index_queue_line = -9
+
         import select  # For non-blocking input
+        last_update = time.time()
 
         while True:
-            current_time = time.time()
-
-            # Refresh if auto-refresh enabled and interval has elapsed
-            if auto_refresh and (current_time - last_refresh >= refresh_interval):
-                clear_screen()
-                print_banner()
-                last_refresh = current_time
-
-                # Get current status
-                status = check_node_status()
-                stats = get_crawl_stats()
-
-                # Display components status
-                print(f"{Colors.BOLD}SYSTEM COMPONENTS STATUS{Colors.ENDC}")
-                print("=" * 60)
-
-                status_table = []
-                for node, info in status.items():
-                    status_str = f"{Colors.GREEN}✓ RUNNING{Colors.ENDC}" if info["status"] == "RUNNING" else f"{Colors.RED}✗ {info['status']}{Colors.ENDC}"
-                    status_table.append([node.capitalize(), status_str, info["message"]])
-
-                print(tabulate(status_table, headers=["Component", "Status", "Message"], tablefmt="simple"))
-
-                # Show option to start master if it's down
-                if status["master"]["status"] != "RUNNING":
-                    print(f"\n{Colors.BOLD}[M] Start Master Node{Colors.ENDC}")
-
-                # Display crawling statistics
-                print(f"\n{Colors.BOLD}CRAWLING STATISTICS{Colors.ENDC}")
-                print(f"Auto-refresh: {'ON' if auto_refresh else 'OFF'} ({refresh_interval}s)")
-                print("=" * 60)
-                print(f"Crawled Pages: {Colors.GREEN}{stats['crawled_pages']}{Colors.ENDC}")
-                print(f"Crawler Queue: {Colors.CYAN}{stats['crawl_queue']}{Colors.ENDC} tasks")
-                print(f"Indexer Queue: {Colors.CYAN}{stats['index_queue']}{Colors.ENDC} tasks")
-
-                # Display latest crawls
-                if stats["latest_crawls"]:
-                    print(f"\n{Colors.BOLD}RECENTLY CRAWLED PAGES{Colors.ENDC}")
-                    print("=" * 60)
-                    for i, page in enumerate(stats["latest_crawls"], 1):
-                        print(f"{i}. {Colors.GREEN}{page['title']}{Colors.ENDC}")
-                        print(f"   URL: {Colors.UNDERLINE}{page['url']}{Colors.ENDC}")
-                        print(f"   Time: {page['timestamp']}")
-
-                # Display options
-                print(f"\n{Colors.BOLD}COMMANDS{Colors.ENDC}")
-                print("=" * 60)
-                print(f"1. {Colors.CYAN}Start new crawl{Colors.ENDC}")
-                print(f"2. {Colors.CYAN}Search crawled content{Colors.ENDC}")
-                print(f"3. {Colors.CYAN}Purge crawled data{Colors.ENDC}")
-                print(f"4. {Colors.CYAN}View/modify configuration{Colors.ENDC}")
-                print(f"a. {Colors.CYAN}Toggle auto-refresh (currently {'ON' if auto_refresh else 'OFF'}){Colors.ENDC}")
-                print(f"m. {Colors.CYAN}Start master node{Colors.ENDC}")
-                print(f"r. {Colors.CYAN}Manual refresh{Colors.ENDC}")
-                print(f"q. {Colors.CYAN}Quit{Colors.ENDC}")
-
             # Check for user input (non-blocking)
             rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
+
+            current_time = time.time()
+            if auto_refresh and current_time - last_update >= refresh_interval:
+                last_update = current_time
+
+                # Get updated stats
+                stats = get_crawl_stats()
+
+                # Only update if values changed
+                if stats["crawled_pages"] != prev_stats["crawled_pages"]:
+                    # Move cursor to crawled line and update
+                    sys.stdout.write(f"\033[{crawled_line}F")
+                    sys.stdout.write(f"Crawled Pages: {Colors.GREEN}{stats['crawled_pages']}{Colors.ENDC}{' ' * 20}")
+                    sys.stdout.write(f"\033[{-crawled_line}E")
+                    prev_stats["crawled_pages"] = stats["crawled_pages"]
+
+                if stats["crawl_queue"] != prev_stats["crawl_queue"]:
+                    # Move cursor to crawl queue line and update
+                    sys.stdout.write(f"\033[{crawl_queue_line}F")
+                    sys.stdout.write(f"Crawler Queue: {Colors.CYAN}{stats['crawl_queue']}{Colors.ENDC} tasks{' ' * 20}")
+                    sys.stdout.write(f"\033[{-crawl_queue_line}E")
+                    prev_stats["crawl_queue"] = stats["crawl_queue"]
+
+                if stats["index_queue"] != prev_stats["index_queue"]:
+                    # Move cursor to index queue line and update
+                    sys.stdout.write(f"\033[{index_queue_line}F")
+                    sys.stdout.write(f"Indexer Queue: {Colors.CYAN}{stats['index_queue']}{Colors.ENDC} tasks{' ' * 20}")
+                    sys.stdout.write(f"\033[{-index_queue_line}E")
+                    prev_stats["index_queue"] = stats["index_queue"]
+
+                # Force flush
+                sys.stdout.flush()
+
             if rlist:
                 choice = sys.stdin.readline().strip()
 
                 if choice == '1':
                     start_new_crawl()
-                    last_refresh = 0  # Force refresh after returning
+                    # Refresh entire dashboard after returning
+                    return show_dashboard()
                 elif choice == '2':
                     search_interface()
-                    last_refresh = 0  # Force refresh after returning
+                    # Refresh entire dashboard after returning
+                    return show_dashboard()
                 elif choice == '3':
                     purge_data()
-                    last_refresh = 0  # Force refresh after returning
+                    # Refresh entire dashboard after returning
+                    return show_dashboard()
                 elif choice == '4':
                     modify_config()
-                    last_refresh = 0  # Force refresh after returning
+                    # Refresh entire dashboard after returning
+                    return show_dashboard()
                 elif choice == 'a':
                     auto_refresh = not auto_refresh
-                    last_refresh = 0  # Force refresh immediately
+                    # Update refresh status
+                    refresh_text = f"a. {Colors.CYAN}Toggle auto-refresh (currently {'ON' if auto_refresh else 'OFF'}){Colors.ENDC}"
+                    sys.stdout.write(f"\033[5F")  # Move up 5 lines
+                    sys.stdout.write(refresh_text + " " * 20 + "\n")
+                    sys.stdout.write(f"\033[4E")  # Move back down
+                    sys.stdout.flush()
                 elif choice == 'm':
+                    # Start master node
                     print(f"\n{Colors.CYAN}Starting master node...{Colors.ENDC}")
                     if start_master_node():
                         print(f"{Colors.GREEN}Master node startup initiated.{Colors.ENDC}")
                         print(f"{Colors.CYAN}Waiting 5 seconds for node to initialize...{Colors.ENDC}")
                         time.sleep(5)  # Wait for startup
-                    last_refresh = 0  # Force refresh after attempt
+                    # Refresh entire dashboard
+                    return show_dashboard()
                 elif choice == 'r':
-                    last_refresh = 0  # Force refresh
+                    # Manual refresh - update all stats
+                    stats = get_crawl_stats()
+
+                    # Update all stats lines
+                    sys.stdout.write(f"\033[{crawled_line}F")
+                    sys.stdout.write(f"Crawled Pages: {Colors.GREEN}{stats['crawled_pages']}{Colors.ENDC}{' ' * 20}")
+                    sys.stdout.write(f"\033[{-crawled_line}E")
+
+                    sys.stdout.write(f"\033[{crawl_queue_line}F")
+                    sys.stdout.write(f"Crawler Queue: {Colors.CYAN}{stats['crawl_queue']}{Colors.ENDC} tasks{' ' * 20}")
+                    sys.stdout.write(f"\033[{-crawl_queue_line}E")
+
+                    sys.stdout.write(f"\033[{index_queue_line}F")
+                    sys.stdout.write(f"Indexer Queue: {Colors.CYAN}{stats['index_queue']}{Colors.ENDC} tasks{' ' * 20}")
+                    sys.stdout.write(f"\033[{-index_queue_line}E")
+
+                    sys.stdout.flush()
+
+                    prev_stats = {
+                        "crawled_pages": stats["crawled_pages"],
+                        "crawl_queue": stats["crawl_queue"],
+                        "index_queue": stats["index_queue"]
+                    }
                 elif choice == 'q':
                     break
-                elif choice == '':
-                    pass  # Ignore empty input
-                else:
-                    print(f"\n{Colors.WARNING}Invalid choice. Press any key to continue...{Colors.ENDC}")
-                    time.sleep(2)
+
     except KeyboardInterrupt:
         print(f"\n{Colors.CYAN}Exiting dashboard...{Colors.ENDC}")
-
+    except Exception as e:
+        print(f"\n{Colors.RED}Error in dashboard: {e}{Colors.ENDC}")
+        input("Press Enter to continue...")
 
 def search_interface():
     """Interface for searching crawled content"""
