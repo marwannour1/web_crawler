@@ -2,37 +2,39 @@
 # filepath: crawler_client.py
 
 """
-Simplified client interface for the distributed web crawler.
-Provides essential commands to manage crawling with minimal monitoring.
+Simplified interface for the distributed web crawler.
+Provides streamlined commands for starting, monitoring, and searching.
 """
 
 import os
 import sys
 import time
+import argparse
 import subprocess
 import requests
 import json
-from tabulate import tabulate
 from datetime import datetime
 
 # Import crawler components
 from distributed_config import CRAWLER_IP, INDEXER_IP, MASTER_IP
 from aws_config import ensure_aws_clients, S3_BUCKET_NAME, S3_OUTPUT_PREFIX
 from crawler_config import CrawlerConfig
+from search import search_content
 from coordinator import start_crawl
 
 # ANSI color codes
 class Colors:
     GREEN = '\033[92m'
     CYAN = '\033[96m'
-    RED = '\033[91m'
     YELLOW = '\033[93m'
+    RED = '\033[91m'
     BOLD = '\033[1m'
     ENDC = '\033[0m'
 
 def print_banner():
     """Print simple banner"""
-    print(f"\n{Colors.BOLD}=== DISTRIBUTED WEB CRAWLER ===\n{Colors.ENDC}")
+    banner = f"\n{Colors.BOLD}=== DISTRIBUTED WEB CRAWLER ===\n{Colors.ENDC}"
+    print(banner)
 
 def check_aws_credentials():
     """Check if AWS credentials are configured properly"""
@@ -45,60 +47,97 @@ def check_aws_credentials():
 
     return True
 
-def ssh_execute(node_ip, command, description=None):
-    """Execute a command on a remote node using SSH"""
+def ssh_command(node_ip, command):
+    """Execute SSH command on remote node"""
     ssh_key_path = os.environ.get('AWS_SSH_KEY_PATH', '~/.ssh/aws-key.pem')
     ssh_user = os.environ.get('AWS_SSH_USER', 'ec2-user')
     ssh_options = "-o StrictHostKeyChecking=no -o ConnectTimeout=5"
 
-    if description:
-        print(f"{Colors.CYAN}● {description}{Colors.ENDC}")
-
-    try:
-        ssh_cmd = f"ssh {ssh_options} -i {ssh_key_path} {ssh_user}@{node_ip} '{command}'"
-        result = subprocess.run(ssh_cmd, shell=True, timeout=30,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-        if result.returncode == 0:
-            return True
-        else:
-            print(f"{Colors.RED}✗ Command failed: {result.stderr.decode().strip()}{Colors.ENDC}")
-            return False
-    except Exception as e:
-        print(f"{Colors.RED}✗ SSH error: {e}{Colors.ENDC}")
-        return False
+    ssh_cmd = f"ssh {ssh_options} -i {ssh_key_path} {ssh_user}@{node_ip} '{command}'"
+    return subprocess.run(ssh_cmd, shell=True, timeout=30,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 def check_node_status():
-    """Check status of all nodes"""
-    results = {
-        "master": {"status": "DOWN", "message": ""},
-        "crawler": {"status": "DOWN", "message": ""},
-        "indexer": {"status": "DOWN", "message": ""}
+    """Check status of crawler components"""
+    nodes = {
+        "Master": MASTER_IP,
+        "Crawler": CRAWLER_IP,
+        "Indexer": INDEXER_IP
     }
 
-    # Check each node
-    nodes = [
-        ("master", MASTER_IP),
-        ("crawler", CRAWLER_IP),
-        ("indexer", INDEXER_IP)
-    ]
+    status = {}
 
-    print(f"\n{Colors.BOLD}Checking node status...{Colors.ENDC}")
-    for name, ip in nodes:
+    for name, ip in nodes.items():
         try:
-            response = requests.get(f"http://{ip}:8080/health", timeout=3)
-            if response.status_code == 200:
-                results[name] = {"status": "RUNNING", "message": ""}
-                print(f"{Colors.GREEN}✓ {name.capitalize()}: RUNNING{Colors.ENDC}")
-            else:
-                print(f"{Colors.RED}✗ {name.capitalize()}: ERROR (HTTP {response.status_code}){Colors.ENDC}")
-        except Exception as e:
-            print(f"{Colors.RED}✗ {name.capitalize()}: DOWN ({str(e).split('(')[0].strip()}){Colors.ENDC}")
+            response = requests.get(f"http://{ip}:8080/health", timeout=2)
+            status[name] = response.status_code == 200
+        except:
+            status[name] = False
 
-    return results
+    return status
 
-def get_crawl_stats():
-    """Get statistics about crawling progress"""
+def start_nodes():
+    """Start all crawler nodes"""
+    print(f"{Colors.CYAN}Starting all crawler components...{Colors.ENDC}")
+
+    # Check status first
+    current_status = check_node_status()
+    nodes_to_start = []
+
+    for name, running in current_status.items():
+        if not running:
+            nodes_to_start.append(name)
+
+    if not nodes_to_start:
+        print(f"{Colors.GREEN}All nodes are already running!{Colors.ENDC}")
+        return True
+
+    print(f"{Colors.YELLOW}Starting: {', '.join(nodes_to_start)}{Colors.ENDC}")
+
+    # Check AWS creds
+    if not check_aws_credentials():
+        return False
+
+    ssh_key_path = os.environ.get('AWS_SSH_KEY_PATH', '~/.ssh/aws-key.pem')
+    ssh_user = os.environ.get('AWS_SSH_USER', 'ec2-user')
+    ssh_options = "-o StrictHostKeyChecking=no -o ConnectTimeout=5"
+
+    # Start each node as needed
+    if "Master" in nodes_to_start:
+        print(f"Starting Master node...")
+        ssh_cmd = f"ssh {ssh_options} -i {ssh_key_path} {ssh_user}@{MASTER_IP} 'cd ~/web_crawler && nohup python3 run_master.py > master.out 2>&1 &'"
+        os.system(ssh_cmd)
+
+    if "Crawler" in nodes_to_start:
+        print(f"Starting Crawler node...")
+        ssh_cmd = f"ssh {ssh_options} -i {ssh_key_path} {ssh_user}@{CRAWLER_IP} 'cd ~/web_crawler && nohup python3 run_crawler.py > crawler.out 2>&1 &'"
+        os.system(ssh_cmd)
+
+    if "Indexer" in nodes_to_start:
+        print(f"Starting Indexer node...")
+        ssh_cmd = f"ssh {ssh_options} -i {ssh_key_path} {ssh_user}@{INDEXER_IP} 'cd ~/web_crawler && nohup python3 run_indexer.py > indexer.out 2>&1 &'"
+        os.system(ssh_cmd)
+
+    # Wait for startup
+    print(f"{Colors.CYAN}Waiting for components to initialize (15s)...{Colors.ENDC}")
+    time.sleep(15)
+
+    # Check status again
+    new_status = check_node_status()
+    all_running = all(new_status.values())
+
+    if all_running:
+        print(f"{Colors.GREEN}All components started successfully!{Colors.ENDC}")
+    else:
+        print(f"{Colors.YELLOW}Some components may have failed to start:{Colors.ENDC}")
+        for name, running in new_status.items():
+            status_str = f"{Colors.GREEN}RUNNING{Colors.ENDC}" if running else f"{Colors.RED}DOWN{Colors.ENDC}"
+            print(f"  - {name}: {status_str}")
+
+    return all_running
+
+def get_stats():
+    """Get current crawling stats"""
     ensure_aws_clients()
     from aws_config import s3_client, sqs_client, SQS_CRAWLER_QUEUE_NAME, SQS_INDEXER_QUEUE_NAME
 
@@ -110,7 +149,7 @@ def get_crawl_stats():
     }
 
     try:
-        # Get crawled pages count from S3
+        # Get crawled pages from S3
         response = s3_client.list_objects_v2(
             Bucket=S3_BUCKET_NAME,
             Prefix=S3_OUTPUT_PREFIX
@@ -119,7 +158,7 @@ def get_crawl_stats():
         if 'Contents' in response:
             stats["crawled_pages"] = sum(1 for item in response['Contents'] if item['Key'].endswith('.json'))
 
-            # Get most recent URL
+            # Get most recent
             sorted_files = sorted(
                 [item for item in response['Contents'] if item['Key'].endswith('.json')],
                 key=lambda x: x['LastModified'],
@@ -137,221 +176,221 @@ def get_crawl_stats():
                 except:
                     pass
 
-        # Get queue stats (SQS)
-        queue_url = sqs_client.get_queue_url(QueueName=SQS_CRAWLER_QUEUE_NAME)['QueueUrl']
-        attrs = sqs_client.get_queue_attributes(
-            QueueUrl=queue_url,
-            AttributeNames=['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible']
-        )
-        stats["crawl_queue"] = (
-            int(attrs['Attributes']['ApproximateNumberOfMessages']) +
-            int(attrs['Attributes']['ApproximateNumberOfMessagesNotVisible'])
-        )
+        # Get queue stats
+        try:
+            queue_url = sqs_client.get_queue_url(QueueName=SQS_CRAWLER_QUEUE_NAME)['QueueUrl']
+            attrs = sqs_client.get_queue_attributes(
+                QueueUrl=queue_url,
+                AttributeNames=['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible']
+            )
+            stats["crawl_queue"] = (
+                int(attrs['Attributes']['ApproximateNumberOfMessages']) +
+                int(attrs['Attributes']['ApproximateNumberOfMessagesNotVisible'])
+            )
 
-        queue_url = sqs_client.get_queue_url(QueueName=SQS_INDEXER_QUEUE_NAME)['QueueUrl']
-        attrs = sqs_client.get_queue_attributes(
-            QueueUrl=queue_url,
-            AttributeNames=['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible']
-        )
-        stats["index_queue"] = (
-            int(attrs['Attributes']['ApproximateNumberOfMessages']) +
-            int(attrs['Attributes']['ApproximateNumberOfMessagesNotVisible'])
-        )
+            queue_url = sqs_client.get_queue_url(QueueName=SQS_INDEXER_QUEUE_NAME)['QueueUrl']
+            attrs = sqs_client.get_queue_attributes(
+                QueueUrl=queue_url,
+                AttributeNames=['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible']
+            )
+            stats["index_queue"] = (
+                int(attrs['Attributes']['ApproximateNumberOfMessages']) +
+                int(attrs['Attributes']['ApproximateNumberOfMessagesNotVisible'])
+            )
+        except Exception as e:
+            print(f"Error getting queue stats: {e}")
     except Exception as e:
-        print(f"{Colors.RED}Error getting stats: {e}{Colors.ENDC}")
+        print(f"Error getting stats: {e}")
 
     return stats
 
-def start_all_components():
-    """Start all crawler system components"""
-    print(f"\n{Colors.BOLD}Starting crawler components...{Colors.ENDC}")
-
-    # Check node status
-    status = check_node_status()
-    all_running = all(node["status"] == "RUNNING" for node in status.values())
-
-    if all_running:
-        print(f"{Colors.GREEN}All components already running!{Colors.ENDC}")
-        return True
-
-    if not check_aws_credentials():
-        return False
-
-    # Start each node that's not running
-    ssh_key_path = os.environ.get('AWS_SSH_KEY_PATH', '~/.ssh/aws-key.pem')
-    ssh_user = os.environ.get('AWS_SSH_USER', 'ec2-user')
-    ssh_options = "-o StrictHostKeyChecking=no -o ConnectTimeout=5"
-
-    nodes_to_start = []
-
-    if status["master"]["status"] != "RUNNING":
-        nodes_to_start.append(("master", MASTER_IP, "run_master.py"))
-
-    if status["crawler"]["status"] != "RUNNING":
-        nodes_to_start.append(("crawler", CRAWLER_IP, "run_crawler.py"))
-
-    if status["indexer"]["status"] != "RUNNING":
-        nodes_to_start.append(("indexer", INDEXER_IP, "run_indexer.py"))
-
-    for node_name, ip, script in nodes_to_start:
-        print(f"Starting {node_name} node on {ip}...")
-        ssh_cmd = f"ssh {ssh_options} -i {ssh_key_path} {ssh_user}@{ip} 'cd ~/web_crawler && nohup python3 {script} > {node_name}.out 2>&1 &'"
-        os.system(ssh_cmd)
-
-    if nodes_to_start:
-        print(f"{Colors.CYAN}Waiting for components to initialize (15s)...{Colors.ENDC}")
-        time.sleep(15)
-
-        # Check status again
-        status = check_node_status()
-        all_running = all(node["status"] == "RUNNING" for node in status.values())
-
-        if not all_running:
-            print(f"{Colors.YELLOW}Warning: Some components failed to start properly.{Colors.ENDC}")
-
-    return True
-
-def monitor_crawl_progress(task_ids):
-    """Simple monitor for crawl progress"""
-    print(f"\n{Colors.BOLD}CRAWL MONITORING{Colors.ENDC}")
-    print("=" * 60)
-    print(f"Started crawl with {len(task_ids)} seed tasks at {datetime.now().strftime('%H:%M:%S')}")
+def monitor_crawl(task_ids, max_runtime=600, update_interval=5):
+    """Monitor crawling progress with live updates"""
+    print(f"{Colors.BOLD}CRAWL MONITORING{Colors.ENDC}")
+    print(f"Started crawl at {datetime.now().strftime('%H:%M:%S')} with {len(task_ids)} seed URLs")
     print(f"Press Ctrl+C to stop monitoring (crawl will continue in background)\n")
 
-    # Track stats
-    initial_stats = get_crawl_stats()
-    last_update = time.time()
-    stable_count = initial_stats["crawled_pages"]
-    stable_since = time.time()
-    no_change_duration = 0
-    max_runtime = 1800  # 30 minutes
+    start_time = time.time()
+    stable_count = 0
+    stable_since = start_time
+    stable_duration = 0
+    last_count = 0
 
     try:
         while True:
-            current_time = time.time()
-            elapsed_time = current_time - last_update
+            # Get current stats
+            stats = get_stats()
+            current_count = stats["crawled_pages"]
+            now = time.time()
 
-            # Update stats every 5 seconds
-            if elapsed_time >= 5:
-                last_update = current_time
-                stats = get_crawl_stats()
+            # Check for stability (no changes in count)
+            if current_count != last_count:
+                stable_since = now
+                stable_duration = 0
+                last_count = current_count
+            else:
+                stable_duration = now - stable_since
 
-                # Check if complete
-                if stats["crawl_queue"] == 0 and stats["index_queue"] == 0 and stats["crawled_pages"] > 0:
-                    # Double check - wait 10 more seconds to be sure
-                    time.sleep(10)
-                    stats = get_crawl_stats()
-                    if stats["crawl_queue"] == 0 and stats["index_queue"] == 0:
-                        print("\n" + "=" * 60)
-                        print(f"{Colors.GREEN}{Colors.BOLD}CRAWL COMPLETE!{Colors.ENDC}")
-                        print(f"Pages crawled: {stats['crawled_pages']}")
-                        print(f"Final timestamp: {datetime.now().strftime('%H:%M:%S')}")
-                        return True
+            # Check if crawl is likely complete
+            crawl_complete = (
+                stats["crawl_queue"] == 0 and
+                stats["index_queue"] == 0 and
+                stable_duration > 10 and
+                current_count > 0
+            )
 
-                # Check if count has stabilized
-                if stats["crawled_pages"] != stable_count:
-                    stable_count = stats["crawled_pages"]
-                    stable_since = time.time()
-                    no_change_duration = 0
-                else:
-                    no_change_duration = time.time() - stable_since
+            # Check if running too long
+            timeout = now - start_time > max_runtime
 
-                # Print status line
-                print(f"\r[{datetime.now().strftime('%H:%M:%S')}] " +
-                      f"Pages: {stats['crawled_pages']} | " +
-                      f"Queue: {stats['crawl_queue']} | " +
-                      f"Index: {stats['index_queue']} | " +
-                      f"Stable: {int(no_change_duration)}s | " +
-                      f"Latest: {stats['latest_url'][:40] + '...' if len(stats['latest_url']) > 40 else stats['latest_url']}",
-                      end="", flush=True)
+            # Display status
+            runtime = int(now - start_time)
+            status_line = (
+                f"\r[{runtime}s] "
+                f"Pages: {current_count} | "
+                f"Queue: {stats['crawl_queue']} | "
+                f"Index: {stats['index_queue']} | "
+                f"Latest: {stats['latest_url'][:40] + '...' if len(stats['latest_url']) > 40 else stats['latest_url']}"
+            )
 
-                # Check if stable for too long
-                if no_change_duration > 120 and stats["crawled_pages"] > 0 and stats["crawl_queue"] == 0 and stats["index_queue"] == 0:
-                    print("\n" + "=" * 60)
-                    print(f"{Colors.GREEN}{Colors.BOLD}CRAWL COMPLETE!{Colors.ENDC}")
-                    print(f"Pages crawled: {stats['crawled_pages']}")
-                    print(f"Final timestamp: {datetime.now().strftime('%H:%M:%S')}")
-                    return True
+            print(status_line, end="", flush=True)
 
-                # Check if running too long
-                if time.time() - stable_since > max_runtime:
-                    print("\n" + "=" * 60)
-                    print(f"{Colors.YELLOW}{Colors.BOLD}CRAWL TIMEOUT{Colors.ENDC}")
-                    print(f"Crawl exceeded maximum runtime of {max_runtime/60} minutes")
-                    print(f"Pages crawled so far: {stats['crawled_pages']}")
-                    return False
+            # Check for completion conditions
+            if crawl_complete:
+                print("\n\n" + "=" * 60)
+                print(f"{Colors.GREEN}CRAWL COMPLETE!{Colors.ENDC}")
+                print(f"Pages crawled: {current_count}")
+                print(f"Runtime: {runtime} seconds")
+                break
 
-            time.sleep(1)
+            if timeout:
+                print("\n\n" + "=" * 60)
+                print(f"{Colors.YELLOW}MAXIMUM RUNTIME REACHED.{Colors.ENDC}")
+                print(f"Crawl may continue in the background.")
+                print(f"Pages crawled so far: {current_count}")
+                break
+
+            time.sleep(update_interval)
 
     except KeyboardInterrupt:
-        stats = get_crawl_stats()
-        print("\n" + "=" * 60)
-        print(f"{Colors.YELLOW}Monitoring stopped by user{Colors.ENDC}")
+        print("\n\n" + "=" * 60)
+        print(f"{Colors.YELLOW}Monitoring stopped. Crawl continues in background.{Colors.ENDC}")
+        stats = get_stats()
         print(f"Pages crawled so far: {stats['crawled_pages']}")
-        print(f"Crawler will continue running in the background")
-        return None
 
-def start_crawl_process():
-    """Start and monitor a crawl process"""
+def launch_search():
+    """Simple search interface"""
+    print(f"\n{Colors.BOLD}SEARCH CRAWLED CONTENT{Colors.ENDC}")
+
+    while True:
+        query = input(f"\n{Colors.BOLD}Enter search query (or 'exit'): {Colors.ENDC}")
+
+        if query.lower() == 'exit':
+            break
+
+        if not query:
+            continue
+
+        print(f"{Colors.CYAN}Searching for: {query}{Colors.ENDC}")
+        results = search_content(query, show_progress=True)
+
+        if not results:
+            print(f"{Colors.YELLOW}No results found.{Colors.ENDC}")
+            continue
+
+        print(f"\n{Colors.GREEN}Found {len(results)} results:{Colors.ENDC}\n")
+
+        for i, result in enumerate(results[:10], 1):  # Show top 10
+            print(f"{i}. {Colors.BOLD}{result['title']}{Colors.ENDC} (Score: {result['score']:.2f})")
+            print(f"   URL: {result['url']}")
+            print(f"   {result['description'][:150]}..." if len(result['description']) > 150 else result['description'])
+            if 'highlights' in result and result['highlights'].get('text_content'):
+                print(f"   Highlights: {result['highlights']['text_content'][0]}...")
+            print()
+
+        if len(results) > 10:
+            print(f"{Colors.YELLOW}Showing 10 of {len(results)} results.{Colors.ENDC}")
+
+def one_command_crawl():
+    """Start everything in one command with minimal interaction"""
     print_banner()
 
-    # Check and start components if needed
-    if not start_all_components():
-        print(f"{Colors.RED}Failed to start required components.{Colors.ENDC}")
+    print(f"{Colors.CYAN}Starting crawler system...{Colors.ENDC}")
+
+    # 1. Start all nodes
+    if not start_nodes():
+        print(f"{Colors.RED}Failed to start some crawler components. Please check logs.{Colors.ENDC}")
         return False
 
-    # Show configuration
+    # 2. Display crawler config
     config = CrawlerConfig().get_config()
-    print(f"\n{Colors.BOLD}CRAWL CONFIGURATION{Colors.ENDC}")
-    print("=" * 60)
+    print(f"\n{Colors.CYAN}Crawler configuration:{Colors.ENDC}")
     print(f"Seed URLs: {', '.join(config['seed_urls'])}")
     print(f"Max depth: {config['max_depth']}")
     print(f"Workers: {config['num_crawlers']} crawlers, {config['num_indexers']} indexers")
-    print(f"Request delay: {config['request_delay']}s, Timeout: {config['timeout']}s")
 
-    # Confirm start
-    start = input(f"\n{Colors.BOLD}Start crawling with these settings? (y/n): {Colors.ENDC}")
-    if start.lower() != "y":
-        print("Crawl cancelled.")
-        return False
+    # 3. Start crawling
+    print(f"\n{Colors.CYAN}Starting crawl...{Colors.ENDC}")
+    task_ids = start_crawl()
+    print(f"{Colors.GREEN}Crawl started with {len(task_ids)} seed URLs{Colors.ENDC}")
 
-    # Start the crawl
-    print(f"\n{Colors.CYAN}Starting crawler...{Colors.ENDC}")
-    try:
-        task_ids = start_crawl()
-        print(f"{Colors.GREEN}Submitted {len(task_ids)} seed tasks.{Colors.ENDC}")
+    # 4. Monitor crawl
+    monitor_crawl(task_ids)
 
-        # Monitor progress
-        result = monitor_crawl_progress(task_ids)
-        if result is True:
-            print(f"\n{Colors.GREEN}Crawl process completed successfully!{Colors.ENDC}")
-        elif result is False:
-            print(f"\n{Colors.YELLOW}Crawl process timed out or had issues.{Colors.ENDC}")
-        # If None, user interrupted monitoring
-
-    except Exception as e:
-        print(f"{Colors.RED}Error starting crawl: {e}{Colors.ENDC}")
-        return False
+    # 5. Prompt for search
+    search_now = input(f"\n{Colors.BOLD}Would you like to search the crawled content? (y/n): {Colors.ENDC}")
+    if search_now.lower() == 'y':
+        launch_search()
 
     return True
 
 def main():
     """Main entry point"""
+    parser = argparse.ArgumentParser(description="Simplified Web Crawler Client")
+    parser.add_argument("command", nargs="?", choices=["run", "status", "search"],
+                        default="run", help="Command to execute")
+    parser.add_argument("--search-query", help="Search query (when using search)")
+
+    args = parser.parse_args()
+
     try:
-        if len(sys.argv) > 1 and sys.argv[1] == "--check":
-            # Just check status
+        if args.command == "run":
+            one_command_crawl()
+        elif args.command == "status":
+            # Show current status
+            status = check_node_status()
             print_banner()
-            check_node_status()
-            stats = get_crawl_stats()
-            print(f"\nPages crawled: {stats['crawled_pages']}")
+            print(f"{Colors.BOLD}SYSTEM STATUS:{Colors.ENDC}")
+            for name, running in status.items():
+                status_str = f"{Colors.GREEN}RUNNING{Colors.ENDC}" if running else f"{Colors.RED}DOWN{Colors.ENDC}"
+                print(f"- {name}: {status_str}")
+
+            stats = get_stats()
+            print(f"\n{Colors.BOLD}CRAWL STATISTICS:{Colors.ENDC}")
+            print(f"Pages crawled: {stats['crawled_pages']}")
             print(f"Crawler queue: {stats['crawl_queue']}")
             print(f"Indexer queue: {stats['index_queue']}")
-        else:
-            # Start and monitor crawl
-            start_crawl_process()
+            if stats['latest_url'] != "None":
+                print(f"Latest URL: {stats['latest_url']}")
 
+        elif args.command == "search":
+            if args.search_query:
+                print_banner()
+                print(f"{Colors.CYAN}Searching for: {args.search_query}{Colors.ENDC}")
+                results = search_content(args.search_query, show_progress=True)
+
+                if not results:
+                    print(f"{Colors.YELLOW}No results found.{Colors.ENDC}")
+                else:
+                    print(f"\n{Colors.GREEN}Found {len(results)} results:{Colors.ENDC}\n")
+                    for i, result in enumerate(results[:10], 1):
+                        print(f"{i}. {Colors.BOLD}{result['title']}{Colors.ENDC}")
+                        print(f"   URL: {result['url']}")
+                        print(f"   {result['description'][:150]}..." if len(result['description']) > 150 else result['description'])
+                        print()
+            else:
+                launch_search()
     except KeyboardInterrupt:
-        print(f"\n\n{Colors.YELLOW}Process interrupted by user.{Colors.ENDC}")
+        print(f"\n\n{Colors.YELLOW}Operation cancelled.{Colors.ENDC}")
     except Exception as e:
         print(f"\n{Colors.RED}Error: {e}{Colors.ENDC}")
 
