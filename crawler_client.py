@@ -278,69 +278,33 @@ def start_all_components():
         print(f"  Crawler: ssh {ssh_user}@{CRAWLER_IP} 'cd ~/web_crawler && python3 run_crawler.py'")
         print(f"  Indexer: ssh {ssh_user}@{INDEXER_IP} 'cd ~/web_crawler && python3 run_indexer.py'")
 
-def show_dashboard():
-    """Display the crawler system dashboard"""
-    while True:
-        clear_screen()
-        print_banner()
 
-        # Get current status
-        status = check_node_status()
-        stats = get_crawl_stats()
 
-        # Display components status
-        print(f"{Colors.BOLD}SYSTEM COMPONENTS STATUS{Colors.ENDC}")
-        print("=" * 60)
+def start_master_node():
+    """Start just the master node"""
+    print(f"\n{Colors.CYAN}Starting master node...{Colors.ENDC}")
 
-        status_table = []
-        for node, info in status.items():
-            status_str = f"{Colors.GREEN}✓ RUNNING{Colors.ENDC}" if info["status"] == "RUNNING" else f"{Colors.RED}✗ {info['status']}{Colors.ENDC}"
-            status_table.append([node.capitalize(), status_str, info["message"]])
+    # Set up SSH configuration
+    ssh_key_path = os.environ.get('AWS_SSH_KEY_PATH', '~/.ssh/aws-key.pem')
+    ssh_user = os.environ.get('AWS_SSH_USER', 'ec2-user')
+    ssh_options = "-o StrictHostKeyChecking=no -o ConnectTimeout=5"
 
-        print(tabulate(status_table, headers=["Component", "Status", "Message"], tablefmt="simple"))
+    try:
+        # Use subprocess instead of os.system for better error handling
+        ssh_cmd = f"ssh {ssh_options} -i {ssh_key_path} {ssh_user}@{MASTER_IP} 'cd ~/web_crawler && nohup python3 run_master.py > master.out 2>&1 &'"
+        result = subprocess.run(ssh_cmd, shell=True, timeout=10,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-        # Display crawling statistics
-        print(f"\n{Colors.BOLD}CRAWLING STATISTICS{Colors.ENDC}")
-        print("=" * 60)
-        print(f"Crawled Pages: {Colors.GREEN}{stats['crawled_pages']}{Colors.ENDC}")
-        print(f"Crawler Queue: {Colors.CYAN}{stats['crawl_queue']}{Colors.ENDC} tasks")
-        print(f"Indexer Queue: {Colors.CYAN}{stats['index_queue']}{Colors.ENDC} tasks")
-
-        # Display latest crawls
-        if stats["latest_crawls"]:
-            print(f"\n{Colors.BOLD}RECENTLY CRAWLED PAGES{Colors.ENDC}")
-            print("=" * 60)
-            for i, page in enumerate(stats["latest_crawls"], 1):
-                print(f"{i}. {Colors.GREEN}{page['title']}{Colors.ENDC}")
-                print(f"   URL: {Colors.UNDERLINE}{page['url']}{Colors.ENDC}")
-                print(f"   Time: {page['timestamp']}")
-
-        # Display options
-        print(f"\n{Colors.BOLD}COMMANDS{Colors.ENDC}")
-        print("=" * 60)
-        print(f"1. {Colors.CYAN}Start new crawl{Colors.ENDC}")
-        print(f"2. {Colors.CYAN}Search crawled content{Colors.ENDC}")
-        print(f"3. {Colors.CYAN}Purge crawled data{Colors.ENDC}")
-        print(f"4. {Colors.CYAN}View/modify configuration{Colors.ENDC}")
-        print(f"r. {Colors.CYAN}Refresh dashboard{Colors.ENDC}")
-        print(f"q. {Colors.CYAN}Quit{Colors.ENDC}")
-
-        choice = input(f"\n{Colors.BOLD}Enter command: {Colors.ENDC}")
-
-        if choice == '1':
-            start_new_crawl()
-        elif choice == '2':
-            search_interface()
-        elif choice == '3':
-            purge_data()
-        elif choice == '4':
-            modify_config()
-        elif choice == 'r':
-            continue  # Refresh by continuing the loop
-        elif choice.lower() == 'q':
-            break
+        if result.returncode == 0:
+            print(f"{Colors.GREEN}Master node startup command sent successfully{Colors.ENDC}")
+            return True
         else:
-            input(f"{Colors.WARNING}Invalid choice. Press Enter to continue...{Colors.ENDC}")
+            print(f"{Colors.RED}Failed to start master node: {result.stderr.decode()}{Colors.ENDC}")
+            return False
+    except Exception as e:
+        print(f"{Colors.RED}Error starting master node: {e}{Colors.ENDC}")
+        return False
+
 
 def start_new_crawl():
     """Start a new crawling operation"""
@@ -382,6 +346,7 @@ def start_new_crawl():
         if confirm.lower() != 'y':
             return
 
+        # Check if nodes are running before starting crawl
         status = check_node_status()
         all_running = all(node["status"] == "RUNNING" for node in status.values())
 
@@ -423,10 +388,138 @@ def start_new_crawl():
         # Ask to start crawl
         confirm = input(f"\n{Colors.BOLD}Start crawl with this URL now? (y/n): {Colors.ENDC}")
         if confirm.lower() == 'y':
+            # Check if nodes are running before starting crawl
+            status = check_node_status()
+            all_running = all(node["status"] == "RUNNING" for node in status.values())
+
+            if not all_running:
+                print(f"\n{Colors.WARNING}Not all required nodes are running:{Colors.ENDC}")
+                for node, info in status.items():
+                    status_color = Colors.GREEN if info["status"] == "RUNNING" else Colors.RED
+                    print(f"  - {node.capitalize()}: {status_color}{info['status']}{Colors.ENDC}")
+
+                start_nodes = input(f"\n{Colors.BOLD}Start missing nodes before crawling? (y/n): {Colors.ENDC}")
+                if start_nodes.lower() == 'y':
+                    print(f"\n{Colors.CYAN}Starting required nodes...{Colors.ENDC}")
+                    start_all_components()
+                else:
+                    print(f"\n{Colors.RED}Crawl can't be started without all nodes running.{Colors.ENDC}")
+                    input("Press Enter to return to dashboard...")
+                    return
+
+            # Start the crawl with new URL
+            print(f"\n{Colors.CYAN}Starting crawler...{Colors.ENDC}")
             task_ids = start_crawl()
             print(f"\n{Colors.GREEN}Crawl started with {len(task_ids)} seed tasks.{Colors.ENDC}")
 
         input("Press Enter to return to dashboard...")
+
+def show_dashboard():
+    """Display the crawler system dashboard with auto-refresh"""
+    # Initialize auto-refresh
+    refresh_interval = 5  # Refresh every 5 seconds
+    auto_refresh = True
+    last_refresh = 0
+
+    try:
+        import select  # For non-blocking input
+
+        while True:
+            current_time = time.time()
+
+            # Refresh if auto-refresh enabled and interval has elapsed
+            if auto_refresh and (current_time - last_refresh >= refresh_interval):
+                clear_screen()
+                print_banner()
+                last_refresh = current_time
+
+                # Get current status
+                status = check_node_status()
+                stats = get_crawl_stats()
+
+                # Display components status
+                print(f"{Colors.BOLD}SYSTEM COMPONENTS STATUS{Colors.ENDC}")
+                print("=" * 60)
+
+                status_table = []
+                for node, info in status.items():
+                    status_str = f"{Colors.GREEN}✓ RUNNING{Colors.ENDC}" if info["status"] == "RUNNING" else f"{Colors.RED}✗ {info['status']}{Colors.ENDC}"
+                    status_table.append([node.capitalize(), status_str, info["message"]])
+
+                print(tabulate(status_table, headers=["Component", "Status", "Message"], tablefmt="simple"))
+
+                # Show option to start master if it's down
+                if status["master"]["status"] != "RUNNING":
+                    print(f"\n{Colors.BOLD}[M] Start Master Node{Colors.ENDC}")
+
+                # Display crawling statistics
+                print(f"\n{Colors.BOLD}CRAWLING STATISTICS{Colors.ENDC}")
+                print(f"Auto-refresh: {'ON' if auto_refresh else 'OFF'} ({refresh_interval}s)")
+                print("=" * 60)
+                print(f"Crawled Pages: {Colors.GREEN}{stats['crawled_pages']}{Colors.ENDC}")
+                print(f"Crawler Queue: {Colors.CYAN}{stats['crawl_queue']}{Colors.ENDC} tasks")
+                print(f"Indexer Queue: {Colors.CYAN}{stats['index_queue']}{Colors.ENDC} tasks")
+
+                # Display latest crawls
+                if stats["latest_crawls"]:
+                    print(f"\n{Colors.BOLD}RECENTLY CRAWLED PAGES{Colors.ENDC}")
+                    print("=" * 60)
+                    for i, page in enumerate(stats["latest_crawls"], 1):
+                        print(f"{i}. {Colors.GREEN}{page['title']}{Colors.ENDC}")
+                        print(f"   URL: {Colors.UNDERLINE}{page['url']}{Colors.ENDC}")
+                        print(f"   Time: {page['timestamp']}")
+
+                # Display options
+                print(f"\n{Colors.BOLD}COMMANDS{Colors.ENDC}")
+                print("=" * 60)
+                print(f"1. {Colors.CYAN}Start new crawl{Colors.ENDC}")
+                print(f"2. {Colors.CYAN}Search crawled content{Colors.ENDC}")
+                print(f"3. {Colors.CYAN}Purge crawled data{Colors.ENDC}")
+                print(f"4. {Colors.CYAN}View/modify configuration{Colors.ENDC}")
+                print(f"a. {Colors.CYAN}Toggle auto-refresh (currently {'ON' if auto_refresh else 'OFF'}){Colors.ENDC}")
+                print(f"m. {Colors.CYAN}Start master node{Colors.ENDC}")
+                print(f"r. {Colors.CYAN}Manual refresh{Colors.ENDC}")
+                print(f"q. {Colors.CYAN}Quit{Colors.ENDC}")
+
+            # Check for user input (non-blocking)
+            rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
+            if rlist:
+                choice = sys.stdin.readline().strip()
+
+                if choice == '1':
+                    start_new_crawl()
+                    last_refresh = 0  # Force refresh after returning
+                elif choice == '2':
+                    search_interface()
+                    last_refresh = 0  # Force refresh after returning
+                elif choice == '3':
+                    purge_data()
+                    last_refresh = 0  # Force refresh after returning
+                elif choice == '4':
+                    modify_config()
+                    last_refresh = 0  # Force refresh after returning
+                elif choice == 'a':
+                    auto_refresh = not auto_refresh
+                    last_refresh = 0  # Force refresh immediately
+                elif choice == 'm':
+                    print(f"\n{Colors.CYAN}Starting master node...{Colors.ENDC}")
+                    if start_master_node():
+                        print(f"{Colors.GREEN}Master node startup initiated.{Colors.ENDC}")
+                        print(f"{Colors.CYAN}Waiting 5 seconds for node to initialize...{Colors.ENDC}")
+                        time.sleep(5)  # Wait for startup
+                    last_refresh = 0  # Force refresh after attempt
+                elif choice == 'r':
+                    last_refresh = 0  # Force refresh
+                elif choice == 'q':
+                    break
+                elif choice == '':
+                    pass  # Ignore empty input
+                else:
+                    print(f"\n{Colors.WARNING}Invalid choice. Press any key to continue...{Colors.ENDC}")
+                    time.sleep(2)
+    except KeyboardInterrupt:
+        print(f"\n{Colors.CYAN}Exiting dashboard...{Colors.ENDC}")
+
 
 def search_interface():
     """Interface for searching crawled content"""
