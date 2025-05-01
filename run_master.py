@@ -44,6 +44,11 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    # Override log method to reduce noise
+    def log_message(self, format, *args):
+        if "/health" not in args[0]:  # Don't log health check requests
+            logger.info("%s - %s" % (self.address_string(), format % args))
+
 def start_health_server():
     """Start HTTP server for health checks"""
     server_address = ('', 8080)
@@ -121,9 +126,9 @@ def main():
     logger.info("Starting Web Crawler Master Node using AWS services")
 
     # Start health server in a background thread
-    health_thread = threading.Thread(target=start_health_server)
-    health_thread.daemon = True
-    health_thread.start()
+    health_server_thread = threading.Thread(target=start_health_server)  # FIXED: Renamed variable
+    health_server_thread.daemon = True
+    health_server_thread.start()
     logger.info("Health check server started")
 
     # Check if required environment variables are set
@@ -140,9 +145,9 @@ def main():
     fix_dynamodb_table()
 
     # Start health check thread
-    health_thread = threading.Thread(target=health_check_worker)
-    health_thread.daemon = True
-    health_thread.start()
+    health_monitor_thread = threading.Thread(target=health_check_worker)  # FIXED: Use different variable name
+    health_monitor_thread.daemon = True
+    health_monitor_thread.start()
     logger.info("Health check monitoring started")
 
     # Start CLI interface
