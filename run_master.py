@@ -8,9 +8,11 @@ The master node is responsible for managing the overall crawler process.
 import os
 import sys
 import time
+import json  # Missing import for JSON
 import requests
 import threading
 import logging
+from http.server import BaseHTTPRequestHandler, HTTPServer  # Missing import for HTTP server
 from crawler_config import CrawlerConfig
 from distributed_config import CRAWLER_IP, INDEXER_IP, MASTER_IP
 from aws_config import setup_aws_resources, fix_dynamodb_table
@@ -42,7 +44,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-    # Override log method to reduce noise
+    # Override log methods to reduce noise
     def log_message(self, format, *args):
         if "/health" not in args[0]:  # Don't log health check requests
             logger.info("%s - %s" % (self.address_string(), format % args))
@@ -124,7 +126,7 @@ def main():
     logger.info("Starting Web Crawler Master Node using AWS services")
 
     # Start health server in a background thread
-    health_server_thread = threading.Thread(target=start_health_server)  # FIXED: Renamed variable
+    health_server_thread = threading.Thread(target=start_health_server)  # Renamed for clarity
     health_server_thread.daemon = True
     health_server_thread.start()
     logger.info("Health check server started")
@@ -143,7 +145,7 @@ def main():
     fix_dynamodb_table()
 
     # Start health check thread
-    health_monitor_thread = threading.Thread(target=health_check_worker)  # FIXED: Use different variable name
+    health_monitor_thread = threading.Thread(target=health_check_worker)  # Renamed for clarity
     health_monitor_thread.daemon = True
     health_monitor_thread.start()
     logger.info("Health check monitoring started")
