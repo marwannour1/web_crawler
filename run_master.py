@@ -5,6 +5,8 @@
 Master node script: initializes AWS services and coordinates the crawl process.
 The master node is responsible for managing the overall crawler process.
 """
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
 import os
 import sys
 import time
@@ -25,6 +27,29 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    """Simple HTTP handler for health checks"""
+    def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "status": "ok",
+                "message": "Master node is running",
+                "node_type": "master"
+            }).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+def start_health_server():
+    """Start HTTP server for health checks"""
+    server_address = ('', 8080)
+    httpd = HTTPServer(server_address, HealthCheckHandler)
+    logger.info("Starting health check server on port 8080")
+    httpd.serve_forever()
 
 def health_check_worker():
     """Run periodic health checks on worker nodes"""
@@ -94,6 +119,12 @@ def count_s3_objects(prefix):
 def main():
     """Main entry point for master node"""
     logger.info("Starting Web Crawler Master Node using AWS services")
+
+    # Start health server in a background thread
+    health_thread = threading.Thread(target=start_health_server)
+    health_thread.daemon = True
+    health_thread.start()
+    logger.info("Health check server started")
 
     # Check if required environment variables are set
     if not check_environment_variables():
