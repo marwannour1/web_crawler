@@ -88,8 +88,8 @@ def monitor_tasks(task_ids, max_runtime=300, status_interval=5):
             print(f"\r[{time.strftime('%H:%M:%S')}] Processing... S3 objects: {current_count} " +
                   f"(+{new_items} since start, stable for {int(no_change_duration)}s)", end="", flush=True)
 
-            # If no new items for 2 minutes and some processing has occurred, assume completion
-            if no_change_duration > 120 and current_count > initial_count:
+            # If no new items for 1 minute and some processing has occurred, assume completion
+            if no_change_duration > 60 and current_count > initial_count:
                 print("\nNo new content for 2 minutes. Crawling complete. Initiating shutdown sequence.")
                 trigger_shutdown()
                 break
