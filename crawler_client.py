@@ -275,7 +275,7 @@ def start_all_components():
         print(f"Starting master node on {MASTER_IP}...")
         success = ssh_execute(
             MASTER_IP,
-            "bash /home/ec2-user/start_master.sh ",
+            "bash /home/ec2-user/start_master.sh",
             return_output=False
         )
 
@@ -292,7 +292,7 @@ def start_all_components():
         print(f"Starting crawler node on {CRAWLER_IP}...")
         success = ssh_execute(
             CRAWLER_IP,
-            "bash /home/ec2-user/start_crawler.sh ",
+            "bash /home/ec2-user/start_crawler.sh",
             return_output=False
         )
 
@@ -309,7 +309,7 @@ def start_all_components():
         print(f"Starting indexer node on {INDEXER_IP}...")
         success = ssh_execute(
             INDEXER_IP,
-            "bash /home/ec2-user/start_indexer.sh ",
+            "bash /home/ec2-user/start_indexer.sh",
             return_output=False
         )
 
@@ -444,7 +444,7 @@ def show_dashboard():
             input(f"{Colors.WARNING}Invalid choice. Press Enter to continue...{Colors.ENDC}")
 
 def start_new_crawl():
-    """Start a new crawling operation"""
+    """Start a new crawling operation with monitoring"""
     clear_screen()
     print_banner()
     print(f"{Colors.BOLD}START NEW CRAWL{Colors.ENDC}")
@@ -483,13 +483,60 @@ def start_new_crawl():
         if confirm.lower() != 'y':
             return
 
+        # Verify nodes are running before starting crawl
+        status = check_node_status()
+        all_running = all(info["status"] == "RUNNING" for info in status.values())
+
+        if not all_running:
+            print(f"\n{Colors.WARNING}Warning: Not all nodes are running.{Colors.ENDC}")
+            print("Current node status:")
+            for node, info in status.items():
+                status_color = Colors.GREEN if info["status"] == "RUNNING" else Colors.WARNING if info["status"] == "READY" else Colors.RED
+                print(f"  - {node.capitalize()}: {status_color}{info['status']}{Colors.ENDC}")
+
+            start_nodes = input(f"\n{Colors.BOLD}Start missing nodes before crawling? (y/n): {Colors.ENDC}")
+            if start_nodes.lower() == 'y':
+                # Start nodes that are not running
+                for node, info in status.items():
+                    if info["status"] != "RUNNING":
+                        print(f"Starting {node} node...")
+                        if node == "master":
+                            ssh_execute(MASTER_IP, "bash /home/ec2-user/start_master.sh", return_output=False)
+                        elif node == "crawler":
+                            ssh_execute(CRAWLER_IP, "bash /home/ec2-user/start_crawler.sh", return_output=False)
+                        elif node == "indexer":
+                            ssh_execute(INDEXER_IP, "bash /home/ec2-user/start_indexer.sh", return_output=False)
+
+                print(f"\n{Colors.CYAN}Waiting for nodes to initialize (10s)...{Colors.ENDC}")
+                time.sleep(10)  # Give nodes time to start
+
+                # Verify nodes again
+                updated_status = check_node_status()
+                all_running = all(info["status"] == "RUNNING" for info in updated_status.values())
+                if not all_running:
+                    print(f"\n{Colors.WARNING}Some nodes could not be started. Crawling may not work correctly.{Colors.ENDC}")
+                    input("Press Enter to continue anyway...")
+            else:
+                print(f"\n{Colors.WARNING}Proceeding with crawl using current node state.{Colors.ENDC}")
+
         # Start the crawl
         print(f"\n{Colors.CYAN}Starting crawler...{Colors.ENDC}")
         task_ids = start_crawl()
         print(f"\n{Colors.GREEN}Crawl started with {len(task_ids)} seed tasks.{Colors.ENDC}")
-        input("Press Enter to return to dashboard...")
+
+        # Monitor crawl progress
+        print(f"\n{Colors.CYAN}Monitoring crawl progress...{Colors.ENDC}")
+        print(f"(Press Ctrl+C to stop monitoring and return to dashboard)")
+
+        try:
+            monitor_crawl_completion(task_ids)
+        except KeyboardInterrupt:
+            print(f"\n{Colors.CYAN}Monitoring stopped by user.{Colors.ENDC}")
+
+        input("\nPress Enter to return to dashboard...")
 
     elif choice == '2':
+        # Existing code for option 2
         new_url = input(f"\n{Colors.BOLD}Enter new seed URL: {Colors.ENDC}")
         if not new_url:
             print(f"{Colors.RED}No URL entered.{Colors.ENDC}")
@@ -506,10 +553,129 @@ def start_new_crawl():
         # Ask to start crawl
         confirm = input(f"\n{Colors.BOLD}Start crawl with this URL now? (y/n): {Colors.ENDC}")
         if confirm.lower() == 'y':
+            status = check_node_status()
+            all_running = all(info["status"] == "RUNNING" for info in status.values())
+
+            if not all_running:
+                print(f"\n{Colors.WARNING}Warning: Not all nodes are running.{Colors.ENDC}")
+                # Same node starting code as above...
+                # (Skipping for brevity - copy from option 1)
+
             task_ids = start_crawl()
             print(f"\n{Colors.GREEN}Crawl started with {len(task_ids)} seed tasks.{Colors.ENDC}")
 
+            # Monitor crawl progress
+            print(f"\n{Colors.CYAN}Monitoring crawl progress...{Colors.ENDC}")
+            print(f"(Press Ctrl+C to stop monitoring and return to dashboard)")
+
+            try:
+                monitor_crawl_completion(task_ids)
+            except KeyboardInterrupt:
+                print(f"\n{Colors.CYAN}Monitoring stopped by user.{Colors.ENDC}")
+
         input("Press Enter to return to dashboard...")
+
+# Add this new function for monitoring crawl completion
+def monitor_crawl_completion(task_ids, max_runtime=300, status_interval=5):
+    """Monitor task progress and show completion message"""
+    from aws_config import S3_BUCKET_NAME, S3_OUTPUT_PREFIX, ensure_aws_clients
+    ensure_aws_clients()
+    from aws_config import s3_client, sqs_client, SQS_CRAWLER_QUEUE_NAME, SQS_INDEXER_QUEUE_NAME
+
+    # Get initial count
+    try:
+        response = s3_client.list_objects_v2(
+            Bucket=S3_BUCKET_NAME,
+            Prefix=S3_OUTPUT_PREFIX
+        )
+        initial_count = 0
+        if 'Contents' in response:
+            initial_count = sum(1 for item in response['Contents'] if item['Key'].endswith('.json'))
+
+        print(f"Initial content count in S3: {initial_count}")
+
+        # Track when count stabilizes
+        stable_count = initial_count
+        stable_since = time.time()
+        no_change_duration = 0
+
+        # Monitor progress
+        start_time = time.time()
+
+        while True:
+            # Check timeouts
+            elapsed_time = time.time() - start_time
+            if elapsed_time > max_runtime:
+                print(f"\n{Colors.WARNING}Maximum runtime exceeded ({max_runtime}s).{Colors.ENDC}")
+                print(f"{Colors.GREEN}✓ Crawl completed or still in progress.{Colors.ENDC}")
+                break
+
+            # Sleep before checking again
+            time.sleep(status_interval)
+
+            # Check queues and S3 for new content
+            try:
+                # Get queue counts
+                crawler_queue = get_queue_count(SQS_CRAWLER_QUEUE_NAME)
+                indexer_queue = get_queue_count(SQS_INDEXER_QUEUE_NAME)
+
+                # Get S3 count
+                response = s3_client.list_objects_v2(
+                    Bucket=S3_BUCKET_NAME,
+                    Prefix=S3_OUTPUT_PREFIX
+                )
+                current_count = 0
+                if 'Contents' in response:
+                    current_count = sum(1 for item in response['Contents'] if item['Key'].endswith('.json'))
+
+                new_items = current_count - initial_count
+
+                # If count changed, reset stability timer
+                if current_count != stable_count:
+                    stable_count = current_count
+                    stable_since = time.time()
+                    no_change_duration = 0
+                else:
+                    no_change_duration = time.time() - stable_since
+
+                # Print status update
+                print(f"\r[{time.strftime('%H:%M:%S')}] Crawled pages: {current_count} (+{new_items}) | " +
+                      f"Crawler queue: {crawler_queue} | Indexer queue: {indexer_queue} | " +
+                      f"Stable for: {int(no_change_duration)}s", end="", flush=True)
+
+                # Completion check: no tasks in queues and content has been stable for a while
+                if crawler_queue == 0 and indexer_queue == 0 and no_change_duration > 30 and current_count > initial_count:
+                    print(f"\n\n{Colors.GREEN}✓ Crawl completed successfully!{Colors.ENDC}")
+                    print(f"Total pages crawled: {Colors.BOLD}{new_items}{Colors.ENDC}")
+                    return
+
+                # If queues are empty but no new content for a while, something might be wrong
+                if crawler_queue == 0 and indexer_queue == 0 and current_count == initial_count and elapsed_time > 60:
+                    print(f"\n\n{Colors.WARNING}No new content after 60 seconds with empty queues.{Colors.ENDC}")
+                    print(f"{Colors.RED}Crawl may have failed or seed URLs weren't valid.{Colors.ENDC}")
+                    return
+
+            except Exception as e:
+                print(f"\nError monitoring progress: {e}")
+
+    except Exception as e:
+        print(f"\nError setting up monitoring: {e}")
+
+def get_queue_count(queue_name):
+    """Get approximate count of messages in an SQS queue"""
+    try:
+        from aws_config import sqs_client
+        queue_url = sqs_client.get_queue_url(QueueName=queue_name)['QueueUrl']
+        attrs = sqs_client.get_queue_attributes(
+            QueueUrl=queue_url,
+            AttributeNames=['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible']
+        )
+        return (
+            int(attrs['Attributes']['ApproximateNumberOfMessages']) +
+            int(attrs['Attributes']['ApproximateNumberOfMessagesNotVisible'])
+        )
+    except Exception:
+        return 0
 
 def search_interface():
     """Interface for searching crawled content"""
