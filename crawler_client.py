@@ -310,7 +310,7 @@ def start_all_components():
         print(f"\n{Colors.WARNING}Some components failed to start:{Colors.ENDC}")
         for node, info in status.items():
             status_str = info["status"]
-            status_color = Colors.GREEN if status_str == "RUNNING" else Colors.YELLOW if status_str == "READY" else Colors.RED
+            status_color = Colors.GREEN if status_str == "RUNNING" else Colors.WARNING if status_str == "READY" else Colors.RED
             print(f"  - {node.capitalize()}: {status_color}{status_str}{Colors.ENDC}")
             if info["message"]:
                 print(f"    {info['message']}")
@@ -335,7 +335,7 @@ def show_dashboard():
             if status_str == "RUNNING":
                 status_display = f"{Colors.GREEN}✓ RUNNING{Colors.ENDC}"
             elif status_str == "READY":
-                status_display = f"{Colors.YELLOW}⚠ READY{Colors.ENDC}"
+                status_display = f"{Colors.WARNING}⚠ READY{Colors.ENDC}"
             else:  # ERROR
                 status_display = f"{Colors.RED}✗ ERROR{Colors.ENDC}"
 
