@@ -69,45 +69,97 @@ def check_aws_credentials():
 
     return True
 
+def ssh_execute(node_ip, command, return_output=True):
+    """Execute a command on a remote node using SSH"""
+    ssh_key_path = os.environ.get('AWS_SSH_KEY_PATH', '~/.ssh/aws-key.pem')
+    ssh_user = os.environ.get('AWS_SSH_USER', 'ec2-user')
+    ssh_options = "-o StrictHostKeyChecking=no -o ConnectTimeout=5"
+
+    try:
+        ssh_cmd = f"ssh {ssh_options} -i {ssh_key_path} {ssh_user}@{node_ip} '{command}'"
+        result = subprocess.run(ssh_cmd, shell=True, timeout=10,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        if result.returncode == 0:
+            if return_output:
+                return True, result.stdout.decode('utf-8')
+            return True
+        else:
+            if return_output:
+                return False, result.stderr.decode('utf-8')
+            return False
+    except Exception as e:
+        if return_output:
+            return False, str(e)
+        return False
+
 def check_node_status():
-    """Check status of all crawler nodes"""
+    """Check status of all crawler nodes using SSH"""
     results = {
-        "master": {"status": "NOT RUNNING", "message": ""},
-        "crawler": {"status": "NOT RUNNING", "message": ""},
-        "indexer": {"status": "NOT RUNNING", "message": ""}
+        "master": {"status": "ERROR", "message": "SSH connection failed"},
+        "crawler": {"status": "ERROR", "message": "SSH connection failed"},
+        "indexer": {"status": "ERROR", "message": "SSH connection failed"}
     }
 
     # Check Master
-    try:
-        response = requests.get(f"http://{MASTER_IP}:8080/health", timeout=3)
-        if response.status_code == 200:
-            results["master"] = {"status": "RUNNING", "message": ""}
+    success, output = ssh_execute(MASTER_IP, "echo Connected")
+    if success:
+        # SSH connection successful, check for process
+        proc_success, proc_output = ssh_execute(
+            MASTER_IP,
+            "ps aux | grep run_master.py | grep -v grep || echo 'Not running'"
+        )
+
+        if proc_success:
+            if "Not running" in proc_output:
+                results["master"] = {"status": "READY", "message": "SSH connection successful, process not running"}
+            else:
+                results["master"] = {"status": "RUNNING", "message": ""}
         else:
-            results["master"] = {"status": "ERROR", "message": f"HTTP {response.status_code}"}
-    except Exception as e:
-        results["master"]["message"] = str(e)
+            results["master"] = {"status": "READY", "message": "SSH connection successful, but process check failed"}
+    else:
+        results["master"] = {"status": "ERROR", "message": output}
 
     # Check Crawler
-    try:
-        response = requests.get(f"http://{CRAWLER_IP}:8080/health", timeout=3)
-        if response.status_code == 200:
-            results["crawler"] = {"status": "RUNNING", "message": ""}
+    success, output = ssh_execute(CRAWLER_IP, "echo Connected")
+    if success:
+        # SSH connection successful, check for process
+        proc_success, proc_output = ssh_execute(
+            CRAWLER_IP,
+            "ps aux | grep run_crawler.py | grep -v grep || echo 'Not running'"
+        )
+
+        if proc_success:
+            if "Not running" in proc_output:
+                results["crawler"] = {"status": "READY", "message": "SSH connection successful, process not running"}
+            else:
+                results["crawler"] = {"status": "RUNNING", "message": ""}
         else:
-            results["crawler"] = {"status": "ERROR", "message": f"HTTP {response.status_code}"}
-    except Exception as e:
-        results["crawler"]["message"] = str(e)
+            results["crawler"] = {"status": "READY", "message": "SSH connection successful, but process check failed"}
+    else:
+        results["crawler"] = {"status": "ERROR", "message": output}
 
     # Check Indexer
-    try:
-        response = requests.get(f"http://{INDEXER_IP}:8080/health", timeout=3)
-        if response.status_code == 200:
-            results["indexer"] = {"status": "RUNNING", "message": ""}
+    success, output = ssh_execute(INDEXER_IP, "echo Connected")
+    if success:
+        # SSH connection successful, check for process
+        proc_success, proc_output = ssh_execute(
+            INDEXER_IP,
+            "ps aux | grep run_indexer.py | grep -v grep || echo 'Not running'"
+        )
+
+        if proc_success:
+            if "Not running" in proc_output:
+                results["indexer"] = {"status": "READY", "message": "SSH connection successful, process not running"}
+            else:
+                results["indexer"] = {"status": "RUNNING", "message": ""}
         else:
-            results["indexer"] = {"status": "ERROR", "message": f"HTTP {response.status_code}"}
-    except Exception as e:
-        results["indexer"]["message"] = str(e)
+            results["indexer"] = {"status": "READY", "message": "SSH connection successful, but process check failed"}
+    else:
+        results["indexer"] = {"status": "ERROR", "message": output}
 
     return results
+
 
 def get_crawl_stats():
     """Get statistics about crawling progress"""
@@ -192,7 +244,7 @@ def get_crawl_stats():
     return stats
 
 def start_all_components():
-    """Start all components of the crawler system"""
+    """Start all components of the crawler system using SSH"""
     print(f"\n{Colors.CYAN}Starting all crawler components...{Colors.ENDC}")
 
     # Check if components are already running
@@ -218,28 +270,36 @@ def start_all_components():
     # 1. Start master (if needed)
     if status["master"]["status"] != "RUNNING":
         print(f"Starting master node on {MASTER_IP}...")
-        # In a production system, you would use SSH to start the process on the remote machine
-        # For now, we'll simulate the start with a local command
-        subprocess.Popen(["python3", "run_master.py"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        time.sleep(2)
+        ssh_execute(
+            MASTER_IP,
+            "cd ~/web_crawler && nohup python3 run_master.py > master.out 2>&1 &",
+            return_output=False
+        )
+        time.sleep(3)  # Give it time to start
 
     # 2. Start crawler (if needed)
     if status["crawler"]["status"] != "RUNNING":
         print(f"Starting crawler node on {CRAWLER_IP}...")
-        # In a production system, use SSH to start on the remote machine
-        subprocess.Popen(["python3", "run_crawler.py"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        time.sleep(2)
+        ssh_execute(
+            CRAWLER_IP,
+            "cd ~/web_crawler && nohup python3 run_crawler.py > crawler.out 2>&1 &",
+            return_output=False
+        )
+        time.sleep(3)  # Give it time to start
 
     # 3. Start indexer (if needed)
     if status["indexer"]["status"] != "RUNNING":
         print(f"Starting indexer node on {INDEXER_IP}...")
-        # In a production system, use SSH to start on the remote machine
-        subprocess.Popen(["python3", "run_indexer.py"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        time.sleep(2)
+        ssh_execute(
+            INDEXER_IP,
+            "cd ~/web_crawler && nohup python3 run_indexer.py > indexer.out 2>&1 &",
+            return_output=False
+        )
+        time.sleep(3)  # Give it time to start
 
     # Wait for startup and check status
-    print(f"\n{Colors.CYAN}Waiting for components to initialize...{Colors.ENDC}")
-    time.sleep(5)
+    print(f"\n{Colors.CYAN}Waiting for components to initialize (10s)...{Colors.ENDC}")
+    time.sleep(10)  # Give nodes time to start up
 
     status = check_node_status()
     all_running = all(node["status"] == "RUNNING" for node in status.values())
@@ -249,10 +309,11 @@ def start_all_components():
     else:
         print(f"\n{Colors.WARNING}Some components failed to start:{Colors.ENDC}")
         for node, info in status.items():
-            status_color = Colors.GREEN if info["status"] == "RUNNING" else Colors.RED
-            print(f"  - {node.capitalize()}: {status_color}{info['status']}{Colors.ENDC}")
+            status_str = info["status"]
+            status_color = Colors.GREEN if status_str == "RUNNING" else Colors.YELLOW if status_str == "READY" else Colors.RED
+            print(f"  - {node.capitalize()}: {status_color}{status_str}{Colors.ENDC}")
             if info["message"]:
-                print(f"    Error: {info['message']}")
+                print(f"    {info['message']}")
 
 def show_dashboard():
     """Display the crawler system dashboard"""
@@ -270,8 +331,15 @@ def show_dashboard():
 
         status_table = []
         for node, info in status.items():
-            status_str = f"{Colors.GREEN}✓ RUNNING{Colors.ENDC}" if info["status"] == "RUNNING" else f"{Colors.RED}✗ {info['status']}{Colors.ENDC}"
-            status_table.append([node.capitalize(), status_str, info["message"]])
+            status_str = info["status"]
+            if status_str == "RUNNING":
+                status_display = f"{Colors.GREEN}✓ RUNNING{Colors.ENDC}"
+            elif status_str == "READY":
+                status_display = f"{Colors.YELLOW}⚠ READY{Colors.ENDC}"
+            else:  # ERROR
+                status_display = f"{Colors.RED}✗ ERROR{Colors.ENDC}"
+
+            status_table.append([node.capitalize(), status_display, info["message"]])
 
         print(tabulate(status_table, headers=["Component", "Status", "Message"], tablefmt="simple"))
 

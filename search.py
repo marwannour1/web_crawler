@@ -6,6 +6,7 @@ Enhanced search interface for the distributed web crawler using Amazon OpenSearc
 Provides a user-friendly interface to search indexed content with highlighting and advanced options.
 """
 
+import difflib
 from elasticsearch import Elasticsearch
 from elasticsearch.connection import RequestsHttpConnection
 from requests_aws4auth import AWS4Auth
