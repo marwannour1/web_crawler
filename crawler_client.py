@@ -273,11 +273,8 @@ def start_all_components():
     # 1. Start master (if needed)
     if status["master"]["status"] != "RUNNING":
         print(f"Starting master node on {MASTER_IP}...")
-        success = ssh_execute(
-            MASTER_IP,
-            "nohup ~/start_master.sh &",
-            return_output=False
-        )
+        success, output = ssh_execute(MASTER_IP, "pwd")
+        print(f"Current working directory on master: {output}")
 
         if success:
             print(f"{Colors.GREEN}Master node start command executed successfully{Colors.ENDC}")
@@ -292,7 +289,7 @@ def start_all_components():
         print(f"Starting crawler node on {CRAWLER_IP}...")
         success = ssh_execute(
             CRAWLER_IP,
-            "nohup ~/start_crawler.sh &",
+            "~/start_crawler.sh",
             return_output=False
         )
 
@@ -309,7 +306,7 @@ def start_all_components():
         print(f"Starting indexer node on {INDEXER_IP}...")
         success = ssh_execute(
             INDEXER_IP,
-            "nohup ~/start_indexer.sh &",
+            "~/start_indexer.sh",
             return_output=False
         )
 
