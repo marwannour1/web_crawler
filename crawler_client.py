@@ -275,7 +275,7 @@ def start_all_components():
         print(f"Starting master node on {MASTER_IP}...")
         success = ssh_execute(
             MASTER_IP,
-            "nohup /home/ec2-user/start_master.sh",
+            "nohup /home/ec2-user/start_master.sh &",
             return_output=False
         )
 
@@ -292,7 +292,7 @@ def start_all_components():
         print(f"Starting crawler node on {CRAWLER_IP}...")
         success = ssh_execute(
             CRAWLER_IP,
-            "nohup /home/ec2-user/start_crawler.sh",
+            "nohup /home/ec2-user/start_crawler.sh &",
             return_output=False
         )
 
@@ -309,7 +309,7 @@ def start_all_components():
         print(f"Starting indexer node on {INDEXER_IP}...")
         success = ssh_execute(
             INDEXER_IP,
-            "nohup /home/ec2-user/start_indexer.sh",
+            "nohup /home/ec2-user/start_indexer.sh &",
             return_output=False
         )
 
