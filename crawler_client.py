@@ -244,7 +244,7 @@ def get_crawl_stats():
     return stats
 
 def start_all_components():
-    """Start all components of the crawler system using SSH"""
+    """Start all components of the crawler system using SSH with verification"""
     print(f"\n{Colors.CYAN}Starting all crawler components...{Colors.ENDC}")
 
     # Check if components are already running
@@ -267,53 +267,110 @@ def start_all_components():
 
     print(f"\n{Colors.CYAN}Launching system components...{Colors.ENDC}")
 
+    # Track which components we're starting
+    started_components = []
+
     # 1. Start master (if needed)
     if status["master"]["status"] != "RUNNING":
         print(f"Starting master node on {MASTER_IP}...")
-        ssh_execute(
+        success = ssh_execute(
             MASTER_IP,
             "cd ~/web_crawler && nohup python3 run_master.py > master.out 2>&1 &",
             return_output=False
         )
-        time.sleep(3)  # Give it time to start
+
+        if success:
+            print(f"{Colors.GREEN}Master node start command executed successfully{Colors.ENDC}")
+            started_components.append("master")
+        else:
+            print(f"{Colors.RED}Failed to start master node{Colors.ENDC}")
+
+        time.sleep(2)  # Give it time to start
 
     # 2. Start crawler (if needed)
     if status["crawler"]["status"] != "RUNNING":
         print(f"Starting crawler node on {CRAWLER_IP}...")
-        ssh_execute(
+        success = ssh_execute(
             CRAWLER_IP,
             "cd ~/web_crawler && nohup python3 run_crawler.py > crawler.out 2>&1 &",
             return_output=False
         )
-        time.sleep(3)  # Give it time to start
+
+        if success:
+            print(f"{Colors.GREEN}Crawler node start command executed successfully{Colors.ENDC}")
+            started_components.append("crawler")
+        else:
+            print(f"{Colors.RED}Failed to start crawler node{Colors.ENDC}")
+
+        time.sleep(2)  # Give it time to start
 
     # 3. Start indexer (if needed)
     if status["indexer"]["status"] != "RUNNING":
         print(f"Starting indexer node on {INDEXER_IP}...")
-        ssh_execute(
+        success = ssh_execute(
             INDEXER_IP,
             "cd ~/web_crawler && nohup python3 run_indexer.py > indexer.out 2>&1 &",
             return_output=False
         )
-        time.sleep(3)  # Give it time to start
+
+        if success:
+            print(f"{Colors.GREEN}Indexer node start command executed successfully{Colors.ENDC}")
+            started_components.append("indexer")
+        else:
+            print(f"{Colors.RED}Failed to start indexer node{Colors.ENDC}")
+
+        time.sleep(2)  # Give it time to start
+
+    if not started_components:
+        print(f"\n{Colors.WARNING}No components needed to be started{Colors.ENDC}")
+        return
 
     # Wait for startup and check status
     print(f"\n{Colors.CYAN}Waiting for components to initialize (10s)...{Colors.ENDC}")
     time.sleep(10)  # Give nodes time to start up
 
-    status = check_node_status()
-    all_running = all(node["status"] == "RUNNING" for node in status.values())
+    # Check if processes are actually running
+    print(f"\n{Colors.CYAN}Verifying component status...{Colors.ENDC}")
 
-    if all_running:
+    updated_status = check_node_status()
+    success_count = 0
+
+    for component in started_components:
+        if updated_status[component]["status"] == "RUNNING":
+            print(f"{Colors.GREEN}✓ {component.capitalize()} started successfully{Colors.ENDC}")
+            success_count += 1
+        else:
+            print(f"{Colors.RED}✗ {component.capitalize()} failed to start{Colors.ENDC}")
+
+            # Show log output to help with debugging
+            if component == "master":
+                log_output = get_last_log_lines(MASTER_IP, "~/web_crawler/master.out")
+                print(f"{Colors.WARNING}Last log lines from master:{Colors.ENDC}\n{log_output}")
+            elif component == "crawler":
+                log_output = get_last_log_lines(CRAWLER_IP, "~/web_crawler/crawler.out")
+                print(f"{Colors.WARNING}Last log lines from crawler:{Colors.ENDC}\n{log_output}")
+            elif component == "indexer":
+                log_output = get_last_log_lines(INDEXER_IP, "~/web_crawler/indexer.out")
+                print(f"{Colors.WARNING}Last log lines from indexer:{Colors.ENDC}\n{log_output}")
+
+    # Final status report
+    if success_count == len(started_components):
         print(f"\n{Colors.GREEN}✓ All components started successfully!{Colors.ENDC}")
     else:
-        print(f"\n{Colors.WARNING}Some components failed to start:{Colors.ENDC}")
-        for node, info in status.items():
-            status_str = info["status"]
-            status_color = Colors.GREEN if status_str == "RUNNING" else Colors.WARNING if status_str == "READY" else Colors.RED
-            print(f"  - {node.capitalize()}: {status_color}{status_str}{Colors.ENDC}")
-            if info["message"]:
-                print(f"    {info['message']}")
+        print(f"\n{Colors.WARNING}Some components failed to start. Please check the logs for details.{Colors.ENDC}")
+
+    input(f"\nPress Enter to continue...")
+
+# Add this helper function to get log output
+def get_last_log_lines(node_ip, log_path, lines=5):
+    """Get the last few lines from a log file on a remote node"""
+    success, output = ssh_execute(node_ip, f"tail -n {lines} {log_path}")
+    if success:
+        return output
+    else:
+        return "Could not retrieve log output"
+
+
 
 def show_dashboard():
     """Display the crawler system dashboard"""
