@@ -107,7 +107,7 @@ def check_node_status():
         # SSH connection successful, check for process
         proc_success, proc_output = ssh_execute(
             MASTER_IP,
-            "ps aux | grep run_master.py start | grep -v grep || echo 'Not running'"
+            "ps aux | grep run_master.py | grep -v grep || echo 'Not running'"
         )
 
         if proc_success:
@@ -275,7 +275,7 @@ def start_all_components():
         print(f"Starting master node on {MASTER_IP}...")
         success = ssh_execute(
             MASTER_IP,
-            "cd ~/web_crawler && nohup python3 run_master.py > master.out 2>&1 &",
+            "cd ~/web_crawler && nohup python3 run_master.py start > master.out 2>&1 &",
             return_output=False
         )
 
