@@ -462,7 +462,7 @@ def start_new_crawl():
     # Options for starting crawl
     print(f"\n{Colors.BOLD}Options:{Colors.ENDC}")
     print(f"1. Start crawl with current seed URLs")
-    print(f"3. Return to dashboard")
+    print(f"2. Return to dashboard")
 
     choice = input(f"\n{Colors.BOLD}Enter choice: {Colors.ENDC}")
 
