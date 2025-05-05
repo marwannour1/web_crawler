@@ -462,7 +462,6 @@ def start_new_crawl():
     # Options for starting crawl
     print(f"\n{Colors.BOLD}Options:{Colors.ENDC}")
     print(f"1. Start crawl with current seed URLs")
-    print(f"2. Enter new seed URL")
     print(f"3. Return to dashboard")
 
     choice = input(f"\n{Colors.BOLD}Enter choice: {Colors.ENDC}")
@@ -536,47 +535,6 @@ def start_new_crawl():
 
         input("\nPress Enter to return to dashboard...")
 
-    elif choice == '2':
-        # Existing code for option 2
-        new_url = input(f"\n{Colors.BOLD}Enter new seed URL: {Colors.ENDC}")
-        if not new_url:
-            print(f"{Colors.RED}No URL entered.{Colors.ENDC}")
-            input("Press Enter to continue...")
-            return
-
-        # Update config with new URL
-        config_manager.config['seed_urls'] = [new_url]
-        if config_manager.save_config():
-            print(f"\n{Colors.GREEN}Seed URL updated and saved: {new_url}{Colors.ENDC}")
-        else:
-            print(f"\n{Colors.WARNING}Seed URL updated but could not save to disk: {new_url}{Colors.ENDC}")
-
-        print(f"\n{Colors.GREEN}Seed URL updated: {new_url}{Colors.ENDC}")
-
-        # Ask to start crawl
-        confirm = input(f"\n{Colors.BOLD}Start crawl with this URL now? (y/n): {Colors.ENDC}")
-        if confirm.lower() == 'y':
-            status = check_node_status()
-            all_running = all(info["status"] == "RUNNING" for info in status.values())
-
-            if not all_running:
-                print(f"\n{Colors.WARNING}Warning: Not all nodes are running.{Colors.ENDC}")
-                # Same node starting code as above...
-                # (Skipping for brevity - copy from option 1)
-
-            task_ids = start_crawl()
-            print(f"\n{Colors.GREEN}Crawl started with {len(task_ids)} seed tasks.{Colors.ENDC}")
-
-            # Monitor crawl progress
-            print(f"\n{Colors.CYAN}Monitoring crawl progress...{Colors.ENDC}")
-            print(f"(Press Ctrl+C to stop monitoring and return to dashboard)")
-
-            try:
-                monitor_crawl_completion(task_ids)
-            except KeyboardInterrupt:
-                print(f"\n{Colors.CYAN}Monitoring stopped by user.{Colors.ENDC}")
-
-        input("Press Enter to return to dashboard...")
 
 # Add this new function for monitoring crawl completion
 def monitor_crawl_completion(task_ids, max_runtime=300, status_interval=5):
