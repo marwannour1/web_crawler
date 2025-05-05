@@ -451,7 +451,8 @@ def start_new_crawl():
     print("=" * 60)
 
     # Load current configuration
-    config = CrawlerConfig().get_config()
+    config_manager = CrawlerConfig()
+    config = config_manager.get_config()
 
     # Show current seed URLs
     print(f"{Colors.BOLD}Current seed URLs:{Colors.ENDC}")
@@ -544,9 +545,11 @@ def start_new_crawl():
             return
 
         # Update config with new URL
-        config['seed_urls'] = [new_url]
-        CrawlerConfig().config = config
-        CrawlerConfig().save_config()
+        config_manager.config['seed_urls'] = [new_url]
+        if config_manager.save_config():
+            print(f"\n{Colors.GREEN}Seed URL updated and saved: {new_url}{Colors.ENDC}")
+        else:
+            print(f"\n{Colors.WARNING}Seed URL updated but could not save to disk: {new_url}{Colors.ENDC}")
 
         print(f"\n{Colors.GREEN}Seed URL updated: {new_url}{Colors.ENDC}")
 
@@ -717,7 +720,8 @@ def modify_config():
     print(f"{Colors.BOLD}CRAWLER CONFIGURATION{Colors.ENDC}")
     print("=" * 60)
 
-    config = CrawlerConfig().get_config()
+    config_manager = CrawlerConfig()
+    config = config_manager.get_config()
 
     # Display current config
     print(f"{Colors.BOLD}Current Configuration:{Colors.ENDC}")
@@ -796,8 +800,8 @@ def modify_config():
         return
 
     # Save automatically after modifying a setting
-    CrawlerConfig().config = config
-    if CrawlerConfig().save_config():
+    config_manager.config = config
+    if config_manager.save_config():
         print(f"\n{Colors.GREEN}Configuration updated and saved.{Colors.ENDC}")
     else:
         print(f"\n{Colors.RED}Configuration updated but not saved.{Colors.ENDC}")
