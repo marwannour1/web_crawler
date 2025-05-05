@@ -607,7 +607,6 @@ def monitor_crawl_completion(task_ids, max_runtime=300, status_interval=5):
                 # Completion check: no tasks in queues and content has been stable for a while
                 if crawler_queue == 0 and indexer_queue == 0 and no_change_duration > 30 and current_count > initial_count:
                     print(f"\n\n{Colors.GREEN}✓ Crawl completed successfully!{Colors.ENDC}")
-                    print(f"Total pages crawled: {Colors.BOLD}{new_items}{Colors.ENDC}")
                     return
 
                 # If queues are empty but no new content for a while, something might be wrong
