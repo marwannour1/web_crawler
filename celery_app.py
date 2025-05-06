@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# filepath: celery_app.py
+# filepath:celery_app.py
 
 import os
 import logging
