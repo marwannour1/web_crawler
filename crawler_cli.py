@@ -41,7 +41,7 @@ def print_config(config):
     print(f"Elasticsearch Index: {config.get('elasticsearch_index', 'webcrawler')}")
     print("-" * 50)
 
-def monitor_tasks(task_ids, max_runtime=300, status_interval=5):
+def monitor_tasks(task_ids, max_runtime=1200, status_interval=5):
     """Monitor task progress and shutdown nodes when crawling is complete"""
     print(f"\nMonitoring {len(task_ids)} crawler tasks...")
 

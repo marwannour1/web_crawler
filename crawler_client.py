@@ -537,7 +537,7 @@ def start_new_crawl():
 
 
 # Add this new function for monitoring crawl completion
-def monitor_crawl_completion(task_ids, max_runtime=300, status_interval=5):
+def monitor_crawl_completion(task_ids, max_runtime=1200, status_interval=5):
     """Monitor task progress and show completion message"""
     from aws_config import S3_BUCKET_NAME, S3_OUTPUT_PREFIX, ensure_aws_clients
     ensure_aws_clients()
