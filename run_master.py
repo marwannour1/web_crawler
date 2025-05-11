@@ -101,7 +101,7 @@ def check_environment_variables():
 
     return True
 
-def monitor_tasks_without_inspector(task_ids, max_runtime=300, status_interval=5):
+def monitor_tasks_without_inspector(task_ids, max_runtime=1200, status_interval=5):
     """Monitor task progress without using Celery inspector (SQS compatible)"""
     print(f"\nMonitoring {len(task_ids)} crawler tasks...")
 
